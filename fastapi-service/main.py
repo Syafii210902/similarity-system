@@ -344,15 +344,18 @@ def run_analysis(payload: AnalysisRequest, metrics: dict) -> dict:
     # 2. TIER 2: VERIFIKASI LLM untuk pasangan >= threshold
     t2 = time.perf_counter()
     results = []
-    flagged_count = 0
+    flagged_count = 0      # pasangan dengan skor >= ambang (keputusan Tahap 1)
+    llm_calls = 0          # panggilan LLM yang benar-benar dilakukan (0 bila Tahap 2 dimatikan)
     for i, j, combined, layer_scores, evidence in pairs:
         doc_a = extracted_docs[i]
         doc_b = extracted_docs[j]
         is_flagged = combined >= payload.threshold
         llm_res = None
 
-        if is_flagged and params["run_tier2"]:
+        if is_flagged:
             flagged_count += 1
+        if is_flagged and params["run_tier2"]:
+            llm_calls += 1
             print("Score >= Threshold! Triggering Gemini LLM...", flush=True)
             llm_res = analyze_similarity_with_llm(doc_a['name'], doc_b['name'], evidence, metrics["llm_usage"])
             if llm.LLM_PROVIDER == "gemini":
@@ -367,7 +370,11 @@ def run_analysis(payload: AnalysisRequest, metrics: dict) -> dict:
             "llm_analysis": llm_res
         })
     metrics["tier2_similarity_seconds"] = round(time.perf_counter() - t2, 3)
-    metrics["llm_similarity_calls"] = flagged_count
+    # Tanpa Tahap 1, LLM harus memeriksa SEMUA pasangan (N(N-1)/2). Penghematan = pasangan yang
+    # tersaring Tahap 1 (skor < ambang), terlepas dari apakah Tahap 2 dijalankan pada run ini.
+    metrics["pairs_total"] = len(pairs)
+    metrics["pairs_above_threshold"] = flagged_count
+    metrics["llm_similarity_calls"] = llm_calls
     metrics["llm_similarity_calls_avoided"] = len(pairs) - flagged_count
     metrics["llm_similarity_errors"] = sum(1 for r in results if r["llm_analysis"] and r["llm_analysis"].get("llm_error"))
 

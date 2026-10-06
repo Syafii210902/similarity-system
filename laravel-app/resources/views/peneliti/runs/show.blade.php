@@ -41,13 +41,27 @@
     <p class="alert alert-danger">Eksperimen gagal: {{ $run->error_message }}</p>
 @else
     {{-- ============ RINGKASAN ============ --}}
+    @php
+        // Dihitung dari skor tersimpan: tanpa Tahap 1, LLM harus memeriksa semua pasangan.
+        $aboveThreshold = $rows->filter(fn ($r) => $r['combined'] >= $runThreshold - 1e-9)->count();
+        $filtered = $rows->count() - $aboveThreshold;
+    @endphp
     <x-figures class="mb-3" :items="[
         'Pasangan' => $rows->count(),
         'Plagiat (label)' => $rows->where('actual', true)->count(),
-        'Diperiksa LLM' => $m['llm_similarity_calls'] ?? 0,
-        'LLM dihemat Tahap 1' => $pct($m['llm_similarity_calls_avoided'] ?? 0, $rows->count()),
+        'Di atas ambang' => $aboveThreshold,
+        'Panggilan LLM dihemat' => $filtered . ' (' . $pct($filtered, $rows->count()) . ')',
         'Durasi' => $run->durationLabel() ?? '—',
     ]" />
+    <p class="mb-1 text-[13px] text-muted">
+        Tanpa Tahap 1, LLM harus memeriksa semua {{ $rows->count() }} pasangan. Tahap 1 hanya meneruskan {{ $aboveThreshold }} pasangan
+        (skor gabungan ≥ {{ $f($runThreshold, 2) }}), sehingga {{ $filtered }} panggilan tidak diperlukan.
+        @if ($tier2)
+            Pada run ini LLM dipanggil {{ $m['llm_similarity_calls'] ?? $aboveThreshold }} kali.
+        @else
+            Tahap 2 tidak dijalankan pada run ini; angka di atas adalah penghematan bila Tahap 2 dijalankan dengan ambang yang sama.
+        @endif
+    </p>
     <p class="mb-8 text-[13px] text-muted">
         Model embedding {{ $m['embedding_model'] ?? '—' }}
         @if (!empty($m['llm']['model']) && (($c['run_tier2'] ?? false) || ($c['run_ai_detection'] ?? false))) · LLM {{ $m['llm']['model'] }}@if (!empty($m['llm']['effort'])) (effort {{ $m['llm']['effort'] }})@endif @endif
