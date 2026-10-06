@@ -1,0 +1,161 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source "../**/*.blade.php";
+@source "../**/*.js";
+
+@theme {
+    --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+    /* Netral sejuk */
+    --color-paper: #f6f6f7;
+    --color-surface: #ffffff;
+    --color-line: #e4e4e7;
+    --color-line-soft: #efeff1;
+    --color-ink: #17171a;
+    --color-muted: #64646e;
+    --color-faint: #9a9aa3;
+    --color-hover: #f3f3f5;
+
+    /* Aksen: teal tua, dipakai hemat (fokus, item aktif, tautan) */
+    --color-brand: #0f6e64;
+    --color-brand-dark: #0b544c;
+    --color-brand-soft: #e6f2f0;
+
+    /* Status */
+    --color-ok: #17803d;
+    --color-ok-soft: #e8f5ec;
+    --color-warn: #a35a00;
+    --color-warn-soft: #fdf3e2;
+    --color-danger: #b42318;
+    --color-danger-soft: #fdeceb;
+
+    --radius-sm: 6px;
+    --radius-md: 8px;
+}
+
+@layer base {
+    body {
+        @apply bg-paper font-sans text-sm text-ink antialiased;
+    }
+
+    a {
+        @apply text-brand underline-offset-[3px] hover:underline;
+    }
+
+    h1, h2, h3 {
+        @apply tracking-[-0.01em];
+    }
+
+    ::selection {
+        @apply bg-brand-soft;
+    }
+}
+
+@layer components {
+    /* Tombol */
+    .btn {
+        @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-sm border px-3.5 py-2 text-sm font-medium no-underline transition hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
+    .btn-primary {
+        @apply border-ink bg-ink text-white hover:bg-[#2c2c31];
+    }
+
+    .btn-secondary {
+        @apply border-line bg-surface text-ink shadow-[0_1px_1px_rgb(0_0_0/0.03)] hover:bg-hover;
+    }
+
+    .btn-danger {
+        @apply border-line bg-surface text-danger hover:border-danger/30 hover:bg-danger-soft;
+    }
+
+    .btn-danger-solid {
+        @apply border-danger bg-danger text-white hover:bg-[#981d13];
+    }
+
+    .btn-sm {
+        @apply px-2.5 py-1.5 text-[13px];
+    }
+
+    /* Form */
+    .form-label {
+        @apply mb-1.5 block text-[13px] font-medium text-ink;
+    }
+
+    .form-input {
+        @apply block w-full rounded-sm border border-line bg-surface px-3 py-2 text-sm text-ink shadow-[0_1px_1px_rgb(0_0_0/0.03)] transition placeholder:text-faint focus:border-brand focus:ring-[3px] focus:ring-brand/12 focus:outline-none;
+    }
+
+    .form-input[aria-invalid='true'] {
+        @apply border-danger focus:ring-danger/12;
+    }
+
+    .form-hint {
+        @apply mt-1.5 text-[13px] text-muted;
+    }
+
+    .form-error {
+        @apply mt-1.5 text-[13px] text-danger;
+    }
+
+    /* Panel & tabel */
+    .panel {
+        @apply rounded-md border border-line bg-surface shadow-[0_1px_2px_rgb(0_0_0/0.03)];
+    }
+
+    .panel-head {
+        @apply flex flex-wrap items-center justify-between gap-2 border-b border-line-soft px-5 py-3.5;
+    }
+
+    .panel-title {
+        @apply text-sm font-semibold text-ink;
+    }
+
+    .data-table {
+        @apply w-full border-collapse text-sm;
+    }
+
+    .data-table th {
+        @apply border-b border-line-soft px-5 py-2.5 text-left text-xs font-medium whitespace-nowrap text-muted;
+    }
+
+    .data-table td {
+        @apply border-b border-line-soft px-5 py-3 align-middle;
+    }
+
+    .data-table tbody tr:last-child td {
+        @apply border-b-0;
+    }
+
+    .data-table tbody tr {
+        @apply transition-colors hover:bg-hover/60;
+    }
+
+    /* Teks pendukung */
+    .num {
+        @apply tabular-nums;
+    }
+
+    .code-tag {
+        @apply rounded-[4px] bg-hover px-1.5 py-0.5 font-mono text-xs text-muted;
+    }
+
+    .alert {
+        @apply rounded-sm border px-4 py-3 text-sm;
+    }
+
+    .alert-ok {
+        @apply border-ok/20 bg-ok-soft text-[#0f5a2b];
+    }
+
+    .alert-warn {
+        @apply border-warn/20 bg-warn-soft text-[#7a4300];
+    }
+
+    .alert-danger {
+        @apply border-danger/20 bg-danger-soft text-[#8a1b12];
+    }
+}

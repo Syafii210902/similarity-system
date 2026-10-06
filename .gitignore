@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------
+# Rahasia: API key, APP_KEY, kunci antar-service. JANGAN di-commit.
+# Salin dari .env.example lalu isi sendiri.
+# ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------
+# Python (fastapi-service)
+# ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# ---------------------------------------------------------------
+# Laravel: artefak lokal tambahan
+# (vendor, node_modules, public/build, dll. diatur di laravel-app/.gitignore)
+# ---------------------------------------------------------------
+laravel-app/campus_app
+laravel-app/nul
+laravel-app/database/*.sqlite
+laravel-app/storage/logs/*.log
+
+# ---------------------------------------------------------------
+# Editor & sistem operasi
+# ---------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

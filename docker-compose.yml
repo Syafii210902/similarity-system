@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: campus_db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-campus_app}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_USER: ${DB_USERNAME:-campus_user}
+    ports:
+      - "3306:3306"
+    volumes:
+      - dbdata:/var/lib/mysql
+    networks:
+      - campus_network
+
+  fastapi:
+    build:
+      context: ./fastapi-service
+      dockerfile: Dockerfile
+    container_name: campus_fastapi
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    environment:
+      # LLM Tier 2. Claude dipakai otomatis bila ANTHROPIC_API_KEY terisi (API key dari console.anthropic.com),
+      # selain itu Gemini. Paksa provider dengan LLM_PROVIDER=anthropic|gemini.
+      - LLM_PROVIDER=${LLM_PROVIDER:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-opus-5-5}
+      - LLM_EFFORT=${LLM_EFFORT:-low}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - EMBEDDING_MODEL_NAME=paraphrase-multilingual-MiniLM-L12-v2
+      - TZ=Asia/Jakarta
+      - ENGINE_API_KEY=${ANALYSIS_ENGINE_KEY}
+      - WEBHOOK_API_KEY=${ANALYSIS_WEBHOOK_KEY}
+    volumes:
+      - ./fastapi-service:/app
+      - hf_cache:/root/.cache/huggingface
+    networks:
+      - campus_network
+
+  laravel:
+    build:
+      context: ./laravel-app
+      dockerfile: Dockerfile
+    container_name: campus_laravel
+    # --no-reload: tanpa opsi ini `artisan serve` membuang env dari Docker (mis. kunci antar-service)
+    # dan hanya membaca .env, sehingga request web tidak melihat FASTAPI_API_KEY / ANALYSIS_WEBHOOK_KEY.
+    command: ["php", "artisan", "serve", "--host=0.0.0.0", "--port=80", "--no-reload"]
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      APP_ENV: local
+      APP_KEY: ${APP_KEY}
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_DATABASE:-campus_app}
+      DB_USERNAME: ${DB_USERNAME:-campus_user}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      FASTAPI_URL: http://fastapi:8000
+      # Beberapa worker agar request paralel (polling status, simpan validasi, aset) tidak saling antre.
+      PHP_CLI_SERVER_WORKERS: 4
+      FASTAPI_API_KEY: ${ANALYSIS_ENGINE_KEY}
+      ANALYSIS_WEBHOOK_KEY: ${ANALYSIS_WEBHOOK_KEY}
+    volumes:
+      - ./laravel-app:/var/www/html
+      - ./laravel-app/docker/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+      - storage_data:/var/www/html/storage/app/public
+    depends_on:
+      - db
+      - fastapi
+    networks:
+      - campus_network
+
+networks:
+  campus_network:
+    driver: bridge
+
+volumes:
+  dbdata:
+    driver: local
+  hf_cache:
+    driver: local
+  storage_data:
+    driver: local

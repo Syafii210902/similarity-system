@@ -1,0 +1,2 @@
+# Dipasang pada layer terpisah agar layer torch/sentence-transformers tetap ter-cache saat build ulang.
+anthropic>=1.0
