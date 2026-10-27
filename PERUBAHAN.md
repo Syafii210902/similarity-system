@@ -116,7 +116,7 @@ Dokumen kini dipecah menjadi tiga lapis (`fastapi-service/multilayer.py`):
 | Lapis | Cara hitung | Yang ditangkap |
 |---|---|---|
 | Dokumen | cosine dari rata-rata embedding semua passage | kesamaan topik |
-| Passage (±60 kata) | rata-rata kecocokan terbaik tiap passage ke dokumen lawan | gagasan sama / parafrase |
+| Passage (±60 kata) | F1 ala BERTScore dari kecocokan terbaik tiap passage ke dokumen lawan (lihat 5.2b) | gagasan sama / parafrase |
 | Kalimat | proporsi kalimat yang punya pasangan hampir identik (cosine ≥ 0,85) | salinan langsung |
 
 Skor gabungan = 0,2 × dokumen + 0,4 × passage + 0,4 × kalimat.
@@ -136,10 +136,34 @@ Lapis dokumen saja memberi 0,61 untuk esai yang tidak menyalin; lapis kalimat da
 > Bobot, ukuran passage, dan ambang kalimat dapat diubah lewat env (`LAYER_WEIGHTS`, `PASSAGE_MAX_WORDS`,
 > `SENTENCE_MATCH_THRESHOLD`) dan tercatat di setiap run.
 
+### 5.2b Dasar teori lapis & pembekuan metode
+- **Skor passage = F1 ala BERTScore** (Zhang dkk., 2020). P = rata-rata kecocokan terbaik passage A ke B,
+  R = sebaliknya, skor = 2PR / (P + R). Sebelumnya dipakai rata-rata biasa (P + R) / 2. Run lama tetap
+  menyimpan skor rumus lama; halaman hasil run menampilkan rumus yang dipakai (`metrics.multilayer.passage_formula`).
+- **Lapis kalimat** setara tahap *seeding* pada *text alignment* PAN (Sanchez-Perez dkk., 2014).
+- **Metode dibekukan** agar tetap fokus pada tiga rumusan masalah: satu model embedding (MiniLM-L12
+  multilingual, dasar: Syuja'i dkk., 2026). Fitur pilihan model sempat dibuat lalu dihapus. Catatan untuk saran
+  penelitian lanjutan: rentang skor cosine berbeda antar-model (uji kalimat: E5-base memberi 0,88 untuk kalimat
+  beda topik, MiniLM 0,10), sehingga perbandingan model membutuhkan kalibrasi ambang per model, misalnya
+  *baseline rescaling* BERTScore.
+- **Keputusan D/P/K vs P saja** diambil dari tabel ablation pada run dengan rumus baru: bila F1 "passage saja"
+  setara gabungan, dipakai P saja.
+
 ### 5.3 Tier 2 berbasis bukti
 LLM tidak lagi membaca 1.500 karakter pertama, melainkan **5 pasangan passage paling mirip dari seluruh dokumen**
 hasil Tier 1. Pada uji yang sama, segmen salinan yang ditemukan naik dari 1 menjadi 5.
 Label segmen diseragamkan menjadi `VERBATIM_COPY` (salinan langsung) dan `PARAPHRASED` (parafrase).
+
+### 5.3b Ekstraksi teks & dokumen bergambar
+- Ekstraksi dipindah ke `fastapi-service/extraction.py`. DOCX kini dibaca **lengkap sesuai urutan**: paragraf,
+  **isi tabel**, dan text box (sebelumnya hanya paragraf, sehingga teks di tabel Word hilang). Header/footer sengaja
+  dilewati karena biasanya berisi identitas/judul yang sama untuk semua mahasiswa.
+- **Gambar tidak dianalisis (tanpa OCR).** Sebagai gantinya, setiap dokumen dihitung jumlah kata, halaman, dan gambarnya,
+  lalu diberi peringatan bila: tidak ada teks sama sekali (hasil scan, sebelumnya diam-diam tidak ikut dianalisis),
+  kurang dari 50 kata per halaman PDF, kurang dari 100 kata per gambar, atau kurang dari 50 kata total.
+  Ambang ini heuristik.
+- Peringatan dikirim di `metrics.document_checks` dan ditampilkan sebagai panel **"Perlu diperiksa manual"** di halaman
+  hasil dosen dan halaman eksperimen Lab.
 
 ### 5.4 Deteksi AI
 - Teks yang dinilai berupa cuplikan merata dari awal, tengah, dan akhir dokumen.
@@ -247,8 +271,20 @@ Akun: `peneliti@kampus.ac.id` / `password`. Hanya role **peneliti** yang dapat m
     serta salah tuduh pada pasangan bukan plagiat.
   - **Tahap 1 vs Tahap 1+2** (confusion matrix), **grafik F1 terhadap ambang** per lapis + tabel data,
     form "coba bobot & ambang lain", evaluasi deteksi AI per kategori dokumen, efisiensi (LLM yang dihemat, waktu, token).
+  - **Pengaruh ambang deteksi AI**: precision, recall, dan F1 deteksi AI untuk ambang 0,10–0,90 (grafik + tabel)
+    dan form mencoba ambang lain, dihitung dari probabilitas tersimpan. Ambang bawaan 0,70/0,35 adalah nilai awal
+    peneliti (bukan dari literatur), sehingga ambang akhir dipilih dari data dengan mengutamakan precision.
   - Peringatan otomatis bila ada panggilan LLM yang gagal (hasil Tahap 2/deteksi AI tidak valid).
   - Ekspor CSV berisi metadata konfigurasi.
+- **Impor massal dokumen.** Pilih banyak berkas sekaligus (maks. 200, masing-masing ≤ 10 MB) ditambah satu
+  **CSV manifest** berkolom `berkas`, `judul`, `kategori`, `sumber` (opsional `teks` sebagai ganti berkas).
+  Templat CSV dapat diunduh dari panel "Impor massal". Manifest boleh disimpan dari Excel (pemisah `;` atau `,`),
+  kategori ditulis dengan bahasa biasa ("parafrase ai", "salinan langsung"), dan `sumber` merujuk nama berkas/judul
+  di manifest atau judul dokumen yang sudah ada di dataset; urutan baris dan rantai turunan bebas.
+  Semua baris diperiksa lebih dulu: bila ada satu kesalahan (berkas tidak diunggah, kategori tak dikenal, sumber
+  kosong/tidak ditemukan/melingkar, berkas tidak tercantum di manifest), **tidak ada yang disimpan** dan setiap
+  kesalahan ditampilkan per nomor baris. Batas unggah PHP dinaikkan (`docker/php/uploads.ini`: `post_max_size` 210M,
+  `max_file_uploads` 200). ZIP tidak dipakai karena ekstensi `zip` PHP tidak tersedia di container.
 - **Uji cepat dua teks**: tempel dua teks, langsung terlihat skor per lapis, passage bukti, dan (opsional) hasil LLM.
   Cocok untuk demonstrasi saat sidang.
 
@@ -295,8 +331,8 @@ Setelah mengubah `.env` root, jalankan `docker compose up -d` agar container mem
 
 ## 14. Pengujian
 
-- **63 test fitur otomatis** (273 assertion) mencakup login dan hak akses, pengumpulan mahasiswa,
-  pengelolaan dosen, alur analisis, kontrak webhook, halaman hasil, validasi, dan perhitungan metrik evaluasi.
+- **84 test fitur otomatis** (388 assertion) mencakup login dan hak akses, pengumpulan mahasiswa,
+  pengelolaan dosen, alur analisis, kontrak webhook, halaman hasil, validasi, perhitungan metrik evaluasi, Lab Pengujian, dan impor massal.
 - Jalankan dengan: `docker exec campus_laravel php artisan test`
 - Selain test otomatis, setiap fitur utama juga diuji langsung di aplikasi yang berjalan
   (termasuk analisis sungguhan dengan FastAPI dan LLM) dan diperiksa tampilannya lewat screenshot.
@@ -311,3 +347,4 @@ Setelah mengubah `.env` root, jalankan `docker compose up -d` agar container mem
 4. Lipton, Z. C., Elkan, C., & Naryanaswamy, B. (2014). Optimal thresholding of classifiers to maximize F1 measure. *ECML PKDD 2014*, 225–239.
 5. Potthast, M., Stein, B., Barrón-Cedeño, A., & Rosso, P. (2010). An evaluation framework for plagiarism detection. *COLING 2010: Posters*, 997–1005.
 6. Foltýnek, T., Meuschke, N., & Gipp, B. (2019). Academic plagiarism detection: A systematic literature review. *ACM Computing Surveys, 52*(6), Art. 112.
+7. Zhang, T., Kishore, V., Wu, F., Weinberger, K. Q., & Artzi, Y. (2020). BERTScore: Evaluating text generation with BERT. *ICLR 2020*.
