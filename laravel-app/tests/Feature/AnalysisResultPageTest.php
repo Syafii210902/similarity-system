@@ -99,6 +99,35 @@ class AnalysisResultPageTest extends TestCase
             ->assertSeeText('12.345');
     }
 
+    public function test_results_page_lists_documents_needing_manual_check(): void
+    {
+        $this->assignment->analysisRuns()->latest('id')->first()->update(['metrics' => [
+            'document_checks' => [
+                ['submission_id' => 1, 'name' => 'Andi', 'extracted' => true, 'words' => 900, 'pages' => 3, 'images' => 0, 'warning' => null],
+                ['submission_id' => 2, 'name' => 'Siti', 'extracted' => true, 'words' => 120, 'pages' => null, 'images' => 4,
+                    'warning' => 'Berisi 4 gambar dengan hanya 120 kata. Teks di dalam gambar (mis. screenshot) tidak ikut dianalisis.'],
+                ['submission_id' => 3, 'name' => 'Budi Scan', 'extracted' => false, 'words' => 0, 'pages' => 5, 'images' => 5,
+                    'warning' => 'Tidak ada teks yang dapat dibaca.'],
+            ],
+        ]]);
+
+        $this->actingAs($this->dosen)
+            ->get(route('dosen.assignments.results', $this->assignment))
+            ->assertOk()
+            ->assertSee('Perlu diperiksa manual')
+            ->assertSeeInOrder(['Budi Scan', 'Tidak dianalisis', 'Siti', 'Sebagian terbaca'])
+            ->assertSee('4 gambar')
+            ->assertDontSee('900 kata');
+    }
+
+    public function test_no_manual_check_panel_without_warnings(): void
+    {
+        $this->actingAs($this->dosen)
+            ->get(route('dosen.assignments.results', $this->assignment))
+            ->assertOk()
+            ->assertDontSee('Perlu diperiksa manual');
+    }
+
     public function test_pair_page_shows_segments_side_by_side(): void
     {
         $this->actingAs($this->dosen)

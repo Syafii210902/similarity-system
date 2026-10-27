@@ -88,6 +88,8 @@
         </div>
     @endif
 
+    <x-document-checks class="mb-10" :checks="$m['document_checks'] ?? []" />
+
     {{-- ============ ABLATION ============ --}}
     <section class="mb-10">
         <h2 class="text-base font-semibold">Ablation: kontribusi tiap lapis embedding</h2>

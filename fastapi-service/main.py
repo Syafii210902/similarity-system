@@ -4,13 +4,11 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple
 import hmac
 import requests
-import pypdf
-import docx
-import io
 import os
 import time
 from sentence_transformers import SentenceTransformer
 
+import extraction
 import llm
 import multilayer
 
@@ -97,26 +95,15 @@ def effective_params(config: Optional[RunConfig]) -> dict:
     }
 
 
-def download_and_extract_text(file_url: str) -> str:
-    """Mengunduh file dari URL dan mengekstrak teksnya (PDF, DOCX, TXT)."""
+def download_and_extract_text(file_url: str) -> Tuple[str, dict]:
+    """Mengunduh file dari URL lalu mengekstrak teks (PDF, DOCX, TXT) beserta statistik isinya."""
     try:
         response = requests.get(file_url, timeout=15)
         response.raise_for_status()
-        file_bytes = io.BytesIO(response.content)
-
-        if file_url.lower().endswith('.pdf'):
-            reader = pypdf.PdfReader(file_bytes)
-            raw_text = "\n".join([page.extract_text() or "" for page in reader.pages])
-        elif file_url.lower().endswith('.docx'):
-            doc = docx.Document(file_bytes)
-            raw_text = "\n".join([p.text for p in doc.paragraphs if p.text])
-        else:
-            raw_text = response.content.decode('utf-8', errors='ignore')
-
-        return raw_text.strip()
+        return extraction.extract(response.content, file_url)
     except Exception as e:
         print(f"Error downloading/extracting {file_url}: {e}", flush=True)
-        return ""
+        return "", {"words": 0, "pages": None, "images": 0, "error": True}
 
 
 def normalize_match_type(value: object) -> str:
@@ -292,10 +279,12 @@ def run_analysis(payload: AnalysisRequest, metrics: dict) -> dict:
     t0 = time.perf_counter()
     extracted_docs = []
     failed_extractions = []
+    document_checks = []   # statistik isi tiap dokumen + peringatan (gambar/scan tidak dianalisis)
     for doc in payload.documents:
         print(f"Downloading file: {doc.file_url}", flush=True)
-        text = download_and_extract_text(doc.file_url)
-        if len(text.strip()) > 5:
+        text, stats = download_and_extract_text(doc.file_url)
+        extracted = len(text.strip()) > 5
+        if extracted:
             extracted_docs.append({
                 "submission_id": doc.submission_id,
                 "name": doc.student_name,
@@ -303,8 +292,24 @@ def run_analysis(payload: AnalysisRequest, metrics: dict) -> dict:
             })
         else:
             failed_extractions.append(doc.submission_id)
+
+        warning = (
+            "Berkas tidak dapat diunduh atau dibaca." if stats.get("error") and not extracted
+            else extraction.text_warning(stats)
+        )
+        document_checks.append({
+            "submission_id": doc.submission_id,
+            "name": doc.student_name,
+            "extracted": extracted,
+            "words": stats["words"],
+            "pages": stats["pages"],
+            "images": stats["images"],
+            "warning": warning,
+        })
     metrics["extraction_seconds"] = round(time.perf_counter() - t0, 3)
     metrics["failed_extractions"] = failed_extractions
+    metrics["document_checks"] = document_checks
+    metrics["documents_with_warning"] = sum(1 for d in document_checks if d["warning"])
 
     if len(extracted_docs) < 2:
         raise ValueError(

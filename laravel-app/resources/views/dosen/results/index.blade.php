@@ -46,6 +46,8 @@
         'Campuran' => $aiCounts->get('MIXED_AI', 0),
     ]" />
 
+    <x-document-checks class="mb-10" :checks="$run?->metrics['document_checks'] ?? []" subject="pengumpulan" />
+
     {{-- ============ KEMIRIPAN ============ --}}
     <section class="mb-10">
         <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
