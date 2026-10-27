@@ -1,4 +1,4 @@
-@props(['sweep', 'series', 'markThreshold' => null])
+@props(['sweep', 'series', 'markThreshold' => null, 'markLabel' => 'ambang run', 'ariaLabel' => 'Grafik F1-score terhadap ambang untuk tiap lapis embedding', 'yLabel' => 'F1'])
 
 {{--
     Grafik garis F1 vs ambang. $sweep[key][(string) threshold] = hasil confusion();
@@ -53,10 +53,10 @@
             <span class="inline-flex items-center gap-1.5"><span class="h-0.5 w-4 rounded" style="background: {{ $line['color'] }}"></span>{{ $line['label'] }}</span>
         @endforeach
         @if ($markThreshold !== null)
-            <span class="inline-flex items-center gap-1.5"><span class="h-3 w-px bg-faint"></span>ambang run</span>
+            <span class="inline-flex items-center gap-1.5"><span class="h-3 w-px bg-faint"></span>{{ $markLabel }}</span>
         @endif
     </div>
-    <svg viewBox="0 0 {{ $w }} {{ $h }}" class="h-auto w-full" role="img" aria-label="Grafik F1-score terhadap ambang untuk tiap lapis embedding">
+    <svg viewBox="0 0 {{ $w }} {{ $h }}" class="h-auto w-full" role="img" aria-label="{{ $ariaLabel }}">
         {{-- grid & sumbu --}}
         @foreach ([0, 0.25, 0.5, 0.75, 1] as $g)
             <line x1="{{ $m['l'] }}" x2="{{ $m['l'] + $pw }}" y1="{{ $y($g) }}" y2="{{ $y($g) }}" stroke="#efeff1" stroke-width="1"/>
@@ -68,7 +68,7 @@
             @endif
         @endforeach
         <text x="{{ $m['l'] + $pw / 2 }}" y="{{ $h - 1 }}" text-anchor="middle" font-size="11" fill="#64646e">Ambang</text>
-        <text x="10" y="{{ $m['t'] + $ph / 2 }}" text-anchor="middle" font-size="11" fill="#64646e" transform="rotate(-90 10 {{ $m['t'] + $ph / 2 }})">F1</text>
+        <text x="10" y="{{ $m['t'] + $ph / 2 }}" text-anchor="middle" font-size="11" fill="#64646e" transform="rotate(-90 10 {{ $m['t'] + $ph / 2 }})">{{ $yLabel }}</text>
 
         @if ($markThreshold !== null && $markThreshold >= $xMin && $markThreshold <= $xMax)
             <line x1="{{ $x($markThreshold) }}" x2="{{ $x($markThreshold) }}" y1="{{ $m['t'] }}" y2="{{ $m['t'] + $ph }}" stroke="#9a9aa3" stroke-width="1" stroke-dasharray="3 3"/>

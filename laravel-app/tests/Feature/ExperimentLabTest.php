@@ -246,6 +246,47 @@ class ExperimentLabTest extends TestCase
         $this->assertSame(93, substr_count(trim($csv), "\n") + 1); // metadata + header + 91 pasangan
     }
 
+    public function test_run_page_lists_documents_needing_manual_check(): void
+    {
+        $run = $this->completedRun($this->sampleDataset());
+        $run->update(['metrics' => array_merge($run->metrics ?? [], ['document_checks' => [
+            ['submission_id' => 1, 'name' => 'Esai hasil scan', 'extracted' => false, 'words' => 0, 'pages' => 2, 'images' => 2,
+                'warning' => 'Tidak ada teks yang dapat dibaca.'],
+        ]])]);
+
+        $this->actingAs($this->peneliti)
+            ->get(route('peneliti.runs.show', $run))
+            ->assertOk()
+            ->assertSee('Perlu diperiksa manual')
+            ->assertSee('Esai hasil scan')
+            ->assertSee('Tidak dianalisis');
+    }
+
+    public function test_ai_threshold_sweep_and_try_threshold(): void
+    {
+        // Data sintetis: dokumen AI berprobabilitas 0,85, dokumen manusia 0,10.
+        $run = $this->completedRun($this->sampleDataset());
+        $ai = app(ExperimentEvaluator::class)->aiEvaluation($run, 0.5);
+
+        $this->assertSame(4, $ai['positives']);
+        $this->assertCount(count(ExperimentEvaluator::AI_THRESHOLDS), $ai['sweep']);
+        // Ambang 0,10 menganggap semua dokumen AI → precision rendah; 0,15–0,85 memisahkan sempurna.
+        $this->assertEqualsWithDelta(4 / 14, $ai['sweep']['0.1']['precision'], 1e-9);
+        $this->assertEqualsWithDelta(1.0, $ai['sweep']['0.5']['f1'], 1e-9);
+        // Di atas 0,85 tidak ada yang dianggap AI → F1 = 0 (bukan tak terdefinisi).
+        $this->assertSame(0.0, $ai['sweep']['0.9']['f1']);
+        // Seri F1 → dipilih ambang tertinggi (paling jarang menuduh).
+        $this->assertEqualsWithDelta(0.85, $ai['bestThreshold'], 1e-9);
+        $this->assertSame(['tp' => 4, 'fp' => 0], array_intersect_key($ai['try'], array_flip(['tp', 'fp'])));
+
+        $this->actingAs($this->peneliti)
+            ->get(route('peneliti.runs.show', $run) . '?at=0.5')
+            ->assertOk()
+            ->assertSee('Pengaruh ambang deteksi AI')
+            ->assertSee('Ambang 0,50')
+            ->assertSee('ambang bawaan 0,70');
+    }
+
     public function test_quick_compare_renders_engine_result(): void
     {
         Http::fake(['*/api/v1/compare-texts' => Http::response([

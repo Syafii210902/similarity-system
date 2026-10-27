@@ -23,6 +23,12 @@ class ExperimentEvaluator
     /** Ambang yang diuji pada sweep & optimasi. */
     public const THRESHOLDS = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95];
 
+    /** Ambang probabilitas yang diuji untuk deteksi AI. */
+    public const AI_THRESHOLDS = [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90];
+
+    /** Ambang verdict bawaan (nilai awal peneliti, bukan dari literatur). */
+    public const AI_VERDICT_THRESHOLDS = ['LIKELY_AI' => 0.70, 'MIXED_AI' => 0.35];
+
     public const FOLDS = 5;
     public const SEED = 42;
 
@@ -181,7 +187,10 @@ class ExperimentEvaluator
         ];
     }
 
-    public function aiEvaluation(ExperimentRun $run): array
+    /**
+     * @param  float|null  $tryThreshold  ambang probabilitas yang ingin dicoba (dokumen dianggap AI bila p >= ambang)
+     */
+    public function aiEvaluation(ExperimentRun $run, ?float $tryThreshold = null): array
     {
         $scores = $run->aiScores()->with('document')->get();
         $valid = $scores->where('verdict', '!=', 'ERROR')->map(fn ($s) => [
@@ -203,7 +212,34 @@ class ExperimentEvaluator
             }
         }
 
+        // Sweep ambang probabilitas: dihitung dari probabilitas tersimpan, tanpa memanggil LLM.
+        $byProbability = fn (float $t) => function ($r) use ($t) {
+            return $r['score']->ai_probability !== null && $r['score']->ai_probability >= $t - 1e-9;
+        };
+        $sweep = [];
+        foreach (self::AI_THRESHOLDS as $t) {
+            $m = $this->metrics->confusion($valid, $byProbability($t));
+            if ($m['f1'] === null && $m['tp'] + $m['fn'] > 0) {
+                $m['f1'] = 0.0; // tidak ada yang dianggap AI padahal ada teks AI → recall 0 → F1 0
+            }
+            $sweep[(string) $t] = $m;
+        }
+        // F1 terbaik; bila seri, pilih ambang lebih tinggi (lebih jarang menuduh mahasiswa).
+        $maxF1 = max(array_map(fn ($m) => $m['f1'] ?? -1.0, $sweep));
+        $best = null;
+        foreach ($sweep as $t => $m) {
+            if ($maxF1 >= 0 && abs(($m['f1'] ?? -1.0) - $maxF1) < 1e-12) {
+                $best = $t; // urutan ambang naik, jadi yang terakhir cocok = ambang tertinggi
+            }
+        }
+
         return [
+            'sweep' => $sweep,
+            'bestThreshold' => $best !== null ? (float) $best : null,
+            'try' => $tryThreshold !== null ? $this->metrics->confusion($valid, $byProbability($tryThreshold)) : null,
+            'tryThreshold' => $tryThreshold,
+            'positives' => $valid->where('actual', true)->count(),
+            'validCount' => $valid->count(),
             'count' => $scores->count(),
             'errors' => $scores->where('verdict', 'ERROR')->count(),
             'strict' => $this->metrics->confusion($valid, fn ($r) => $r['score']->verdict === 'LIKELY_AI'),

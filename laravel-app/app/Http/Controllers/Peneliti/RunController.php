@@ -91,7 +91,9 @@ class RunController extends Controller
                 'tryWeights' => $tryWeights,
                 'tryThreshold' => $tryThreshold,
                 'tryResult' => $this->evaluator->evaluate($rows, $tryWeights, $tryThreshold),
-                'ai' => ($run->config['run_ai_detection'] ?? false) ? $this->evaluator->aiEvaluation($run) : null,
+                'ai' => ($run->config['run_ai_detection'] ?? false)
+                    ? $this->evaluator->aiEvaluation($run, $request->filled('at') ? max(0.0, min(1.0, (float) $request->input('at'))) : null)
+                    : null,
             ];
         }
 

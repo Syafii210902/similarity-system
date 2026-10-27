@@ -246,6 +246,78 @@
                 @include('dosen.evaluation._confusion', ['title' => 'Ketat: hanya “Kemungkinan AI”', 'm' => $ai['strict'], 'positive' => 'AI', 'negative' => 'Manusia'])
                 @include('dosen.evaluation._confusion', ['title' => 'Longgar: “Kemungkinan AI” atau “Campuran”', 'm' => $ai['lenient'], 'positive' => 'AI', 'negative' => 'Manusia'])
             </div>
+
+            {{-- Sweep ambang probabilitas AI --}}
+            <div id="ambang-ai" class="panel mb-4 p-5">
+                <h3 class="panel-title">Pengaruh ambang deteksi AI</h3>
+                <p class="mb-4 mt-1 text-[13px] leading-relaxed text-muted">
+                    Dokumen dianggap teks AI bila probabilitasnya ≥ ambang. Ambang bawaan (0,70 “Kemungkinan AI” dan 0,35 “Campuran”)
+                    adalah nilai awal peneliti, bukan dari literatur. Probabilitas berasal dari penilaian LLM yang cenderung tidak terkalibrasi,
+                    sehingga ambang sebaiknya dipilih dari tabel ini. Untuk tugas mahasiswa, utamakan <b>precision</b> (hindari salah menuduh).
+                    Dihitung dari {{ $ai['validCount'] }} dokumen ({{ $ai['positives'] }} berlabel AI), tanpa memanggil LLM lagi.
+                </p>
+                @if ($ai['validCount'] === 0)
+                    <p class="text-muted">Tidak ada hasil deteksi AI yang valid (semua gagal dianalisis), sehingga ambang tidak dapat dievaluasi.</p>
+                @else
+                @php
+                    $aiChart = [];
+                    foreach (['precision', 'recall', 'f1'] as $metric) {
+                        foreach ($ai['sweep'] as $t => $mm) {
+                            $aiChart[$metric][$t] = ['f1' => $metric === 'precision' && $mm['precision'] === null ? null : ($mm[$metric] ?? null)];
+                        }
+                    }
+                @endphp
+                <x-f1-chart :sweep="$aiChart" :mark-threshold="0.70" mark-label="ambang bawaan 0,70"
+                    aria-label="Grafik precision, recall, dan F1 deteksi AI terhadap ambang probabilitas" y-label="Nilai"
+                    :series="['f1' => 'F1', 'precision' => 'Precision', 'recall' => 'Recall']" />
+
+                <details class="mt-4 border-t border-line-soft pt-3" @if ($ai['tryThreshold'] !== null) open @endif>
+                    <summary class="cursor-pointer text-[13px] text-brand">Tabel data &amp; coba ambang lain</summary>
+                    <div class="mt-3 grid gap-4 lg:grid-cols-[240px_1fr]">
+                        <div>
+                            <form method="GET" action="{{ route('peneliti.runs.show', $run) }}#ambang-ai" class="space-y-3">
+                                @foreach (['wd', 'wp', 'ws', 't'] as $keep)
+                                    @if (request()->filled($keep))<input type="hidden" name="{{ $keep }}" value="{{ request($keep) }}">@endif
+                                @endforeach
+                                <label for="at" class="form-label">Coba ambang probabilitas</label>
+                                <div class="flex gap-2">
+                                    <input id="at" name="at" type="number" step="0.01" min="0" max="1" value="{{ $ai['tryThreshold'] ?? '0.70' }}" class="form-input num w-28">
+                                    <button type="submit" class="btn btn-primary">Hitung</button>
+                                </div>
+                            </form>
+                        </div>
+                        <div>
+                            @if ($ai['try'])
+                                @include('dosen.evaluation._confusion', ['title' => 'Ambang ' . $f($ai['tryThreshold'], 2), 'm' => $ai['try'], 'positive' => 'AI', 'negative' => 'Manusia'])
+                            @endif
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <div class="overflow-x-auto">
+                            <table class="data-table">
+                                <thead><tr><th>Ambang</th><th class="text-right">Dianggap AI</th><th class="text-right">Precision</th><th class="text-right">Recall</th><th class="text-right">F1</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach ($ai['sweep'] as $t => $mm)
+                                        @php $isBest = $ai['bestThreshold'] !== null && abs((float) $t - $ai['bestThreshold']) < 1e-9; @endphp
+                                        <tr @class(['bg-brand-soft/40' => $isBest])>
+                                            <td class="num">{{ $f((float) $t, 2) }}</td>
+                                            <td class="num text-right">{{ $mm['tp'] + $mm['fp'] }}</td>
+                                            <td class="num text-right">{{ $f($mm['precision']) }}</td>
+                                            <td class="num text-right">{{ $f($mm['recall']) }}</td>
+                                            <td class="num text-right {{ $isBest ? 'font-semibold' : '' }}">{{ $f($mm['f1']) }}</td>
+                                            <td class="text-xs text-muted">
+                                                @if ($isBest) F1 tertinggi @endif
+                                                @if (abs((float) $t - 0.70) < 1e-9) bawaan “Kemungkinan AI” @elseif (abs((float) $t - 0.35) < 1e-9) bawaan “Campuran” @endif
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </details>
+                @endif
+            </div>
             <div class="panel overflow-x-auto">
                 <table class="data-table">
                     <thead><tr><th>Kategori dokumen</th><th>Label</th><th class="text-right">n</th><th class="text-right">Rata-rata probabilitas AI</th><th class="text-right">Dinilai “Kemungkinan AI”</th></tr></thead>
