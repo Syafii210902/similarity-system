@@ -337,6 +337,7 @@ def run_analysis(payload: AnalysisRequest, metrics: dict) -> dict:
             pairs.append((i, j, combined, layer_scores, evidence))
     metrics["tier1_seconds"] = round(time.perf_counter() - t1, 3)
     metrics["multilayer"] = {
+        "passage_formula": multilayer.PASSAGE_FORMULA,
         "passage_max_words": params["passage_max_words"],
         "sentence_match_threshold": params["sentence_match_threshold"],
         "weights": {"document": params["weights"][0], "passage": params["weights"][1], "sentence": params["weights"][2]},

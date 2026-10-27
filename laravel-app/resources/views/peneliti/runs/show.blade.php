@@ -64,6 +64,7 @@
     </p>
     <p class="mb-8 text-[13px] text-muted">
         Model embedding {{ $m['embedding_model'] ?? '—' }}
+        · skor passage {{ ($m['multilayer']['passage_formula'] ?? null) === 'bertscore_f1' ? 'F1 ala BERTScore' : 'rata-rata dua arah (rumus lama)' }}
         @if (!empty($m['llm']['model']) && (($c['run_tier2'] ?? false) || ($c['run_ai_detection'] ?? false))) · LLM {{ $m['llm']['model'] }}@if (!empty($m['llm']['effort'])) (effort {{ $m['llm']['effort'] }})@endif @endif
         · ekstraksi {{ $f($m['extraction_seconds'] ?? null, 1) }} dtk · Tahap 1 {{ $f($m['tier1_seconds'] ?? null, 1) }} dtk
         @if ($c['run_tier2'] ?? false) · Tahap 2 {{ $f($m['tier2_similarity_seconds'] ?? null, 1) }} dtk @endif

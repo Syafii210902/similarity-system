@@ -11,7 +11,9 @@ tidak boleh di-encode sekaligus. Dokumen dipecah menjadi tiga lapis:
 
 Skor per pasangan dokumen:
   - document : cosine(embedding dokumen A, embedding dokumen B)
-  - passage  : rata-rata simetris dari kecocokan terbaik tiap passage ke dokumen lawan
+  - passage  : F1 ala BERTScore (Zhang dkk., 2020) pada tingkat passage. Tiap passage dicocokkan
+               secara greedy ke passage paling mirip di dokumen lawan; P = rata-rata kecocokan
+               passage A, R = rata-rata kecocokan passage B, passage = 2PR / (P + R)
   - sentence : proporsi kalimat (simetris) yang memiliki pasangan dengan cosine >= SENTENCE_MATCH_THRESHOLD
   - combined : w_doc*document + w_passage*passage + w_sentence*sentence
 
@@ -31,6 +33,9 @@ from sentence_transformers import SentenceTransformer
 SENTENCE_BOUNDARY = re.compile(r'(?<=[.!?])\s+(?=[A-Z0-9"“‘(\[])')
 HYPHEN_LINEBREAK = re.compile(r'([a-z])-\s+([a-z])')
 WHITESPACE = re.compile(r'\s+')
+
+# Dicatat di metrics run agar skor passage lama (rata-rata biasa) dapat dibedakan dari yang baru.
+PASSAGE_FORMULA = 'bertscore_f1'
 
 
 @dataclass
@@ -110,6 +115,18 @@ def encode_document(model: SentenceTransformer, text: str, passage_max_words: in
     return DocumentLayers(sentences, passages, sentence_emb, passage_emb, document_emb)
 
 
+def bertscore_f1(similarity: torch.Tensor) -> float:
+    """F1 greedy matching ala BERTScore dari matriks cosine (baris = unit A, kolom = unit B).
+
+    Cosine negatif dipotong ke 0 agar P, R, dan F1 tetap di rentang [0, 1].
+    """
+    precision = float(similarity.max(dim=1).values.clamp(min=0).mean())
+    recall = float(similarity.max(dim=0).values.clamp(min=0).mean())
+    if precision + recall == 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
+
+
 def pair_scores(
     a: DocumentLayers,
     b: DocumentLayers,
@@ -120,7 +137,7 @@ def pair_scores(
     document = float(a.document_emb @ b.document_emb)
 
     passage_sim = a.passage_emb @ b.passage_emb.T
-    passage = float((passage_sim.max(dim=1).values.mean() + passage_sim.max(dim=0).values.mean()) / 2)
+    passage = bertscore_f1(passage_sim)
 
     sentence_sim = a.sentence_emb @ b.sentence_emb.T
     coverage_a = (sentence_sim.max(dim=1).values >= sentence_match_threshold).float().mean()
