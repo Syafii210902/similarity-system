@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Peneliti;
 use App\Http\Controllers\Controller;
 use App\Models\ExperimentDataset;
 use App\Models\ExperimentDocument;
+use App\Services\ExperimentImportService;
 use App\Services\ExperimentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,7 +17,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class DocumentController extends Controller
 {
     public function __construct(
-        protected ExperimentService $experiments
+        protected ExperimentService $experiments,
+        protected ExperimentImportService $importer
     ) {}
 
     public function store(Request $request, ExperimentDataset $dataset): RedirectResponse
@@ -43,6 +45,38 @@ class DocumentController extends Controller
         $this->experiments->addDocument($dataset, $data, $request->file('file'), $request->hasFile('file') ? null : ($data['text'] ?? null));
 
         return redirect()->to(route('peneliti.datasets.show', $dataset) . '#dokumen')->with('success', "Dokumen “{$data['title']}” ditambahkan.");
+    }
+
+    /**
+     * Impor massal: banyak berkas + CSV manifest. Semua baris divalidasi dulu; satu kesalahan membatalkan seluruh impor.
+     */
+    public function import(Request $request, ExperimentDataset $dataset): RedirectResponse
+    {
+        $request->validate([
+            'manifest' => ['required', 'file', 'extensions:csv,txt', 'max:2048'],
+            'files' => ['nullable', 'array', 'max:' . ExperimentImportService::MAX_ROWS],
+            'files.*' => ['file'],
+        ], [
+            'manifest.required' => 'Pilih file CSV manifest.',
+            'manifest.extensions' => 'Manifest harus berformat CSV.',
+            'files.max' => 'Maksimal ' . ExperimentImportService::MAX_ROWS . ' berkas per impor.',
+        ]);
+
+        $result = $this->importer->import($dataset, $request->file('manifest'), $request->file('files', []));
+        $back = redirect()->to(route('peneliti.datasets.show', $dataset) . '#impor');
+
+        return $result['errors']
+            ? $back->with('import_errors', $result['errors'])
+            : $back->with('success', "{$result['imported']} dokumen berhasil diimpor.");
+    }
+
+    public function template(): StreamedResponse
+    {
+        return response()->streamDownload(
+            fn () => print(ExperimentImportService::templateCsv()),
+            'templat-manifest-korpus.csv',
+            ['Content-Type' => 'text/csv; charset=UTF-8']
+        );
     }
 
     public function show(ExperimentDocument $document): View|StreamedResponse

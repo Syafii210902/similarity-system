@@ -83,6 +83,8 @@ Route::middleware('auth')->group(function () {
         Route::delete('/datasets/{dataset}', [PenelitiDatasetController::class, 'destroy'])->name('datasets.destroy');
 
         Route::post('/datasets/{dataset}/documents', [PenelitiDocumentController::class, 'store'])->name('documents.store');
+        Route::post('/datasets/{dataset}/documents/import', [PenelitiDocumentController::class, 'import'])->name('documents.import');
+        Route::get('/documents/import-template', [PenelitiDocumentController::class, 'template'])->name('documents.template');
         Route::get('/documents/{document}', [PenelitiDocumentController::class, 'show'])->name('documents.show');
         Route::delete('/documents/{document}', [PenelitiDocumentController::class, 'destroy'])->name('documents.destroy');
 

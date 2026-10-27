@@ -73,6 +73,7 @@
         </div>
     </div>
 
+    <div class="space-y-6">
     <form method="POST" action="{{ route('peneliti.documents.store', $dataset) }}" enctype="multipart/form-data" class="panel h-fit" data-document-form>
         @csrf
         <div class="panel-head"><h2 class="panel-title">Tambah dokumen</h2></div>
@@ -114,6 +115,37 @@
             <button type="submit" class="btn btn-primary w-full">Tambah dokumen</button>
         </div>
     </form>
+
+    <form id="impor" method="POST" action="{{ route('peneliti.documents.import', $dataset) }}" enctype="multipart/form-data" class="panel h-fit">
+        @csrf
+        <div class="panel-head">
+            <h2 class="panel-title">Impor massal</h2>
+            <a href="{{ route('peneliti.documents.template') }}" class="text-[13px]">Unduh templat CSV</a>
+        </div>
+        <div class="space-y-4 p-5">
+            <p class="text-[13px] text-muted">Satu baris CSV per dokumen: <code>berkas</code>, <code>judul</code>, <code>kategori</code>, <code>sumber</code>. Kolom <code>sumber</code> diisi nama berkas atau judul dokumen asalnya. Bisa dibuka dan disimpan dari Excel.</p>
+            @if (session('import_errors'))
+                <div class="alert alert-danger text-[13px]">
+                    <p class="mb-1 font-medium">Tidak ada dokumen yang disimpan. Perbaiki lalu unggah ulang:</p>
+                    <ul class="list-disc space-y-0.5 pl-4">
+                        @foreach (session('import_errors') as $err)<li>{{ $err }}</li>@endforeach
+                    </ul>
+                </div>
+            @endif
+            <div>
+                <label for="manifest" class="form-label">Manifest <span class="font-normal text-muted">(CSV)</span></label>
+                <input id="manifest" name="manifest" type="file" accept=".csv,text/csv" required class="block w-full text-[13px] text-muted file:mr-3 file:rounded-sm file:border file:border-line file:bg-surface file:px-3 file:py-1.5 file:text-ink hover:file:bg-hover">
+                @error('manifest')<p class="form-error">{{ $message }}</p>@enderror
+            </div>
+            <div>
+                <label for="files" class="form-label">Berkas dokumen <span class="font-normal text-muted">(boleh pilih banyak · maks. 200)</span></label>
+                <input id="files" name="files[]" type="file" multiple accept=".pdf,.docx,.txt" class="block w-full text-[13px] text-muted file:mr-3 file:rounded-sm file:border file:border-line file:bg-surface file:px-3 file:py-1.5 file:text-ink hover:file:bg-hover">
+                @error('files')<p class="form-error">{{ $message }}</p>@enderror
+            </div>
+            <button type="submit" class="btn btn-secondary w-full">Impor</button>
+        </div>
+    </form>
+    </div>
 </section>
 
 {{-- ============ EKSPERIMEN ============ --}}
