@@ -19,7 +19,7 @@
 @section('content')
 <x-page-header title="Hasil analisis"
     :crumbs="['Mata kuliah' => route('dosen.courses.index'), $course->code => route('dosen.courses.show', $course), $assignment->title => route('dosen.assignments.show', $assignment), 'Hasil' => null]"
-    :meta="$run ? 'Dijalankan ' . $run->finished_at->translatedFormat('d M Y, H:i') . ' · ambang ' . L::score($run->threshold, 2) . ' · ' . ($run->embedding_model ?? 'model tidak tercatat') . ($llmInfo ? ' · LLM ' . $llmInfo['model'] . (!empty($llmInfo['effort']) ? ' (effort ' . $llmInfo['effort'] . ')' : '') : '') . ($run->durationLabel() ? ' · ' . $run->durationLabel() : '') : null">
+    :meta="$run ? 'Dijalankan ' . $run->finished_at->translatedFormat('d M Y, H:i') . ' · ambang ' . L::score($run->threshold, 2) . ' · ' . ($run->embedding_model ?? 'model tidak tercatat') . ($llmInfo ? ' · LLM ' . $llmInfo['model'] : '') . ($run->durationLabel() ? ' · ' . $run->durationLabel() : '') : null">
     <x-slot:actions>
         <a href="{{ route('dosen.assignments.show', $assignment) }}" class="btn btn-secondary">Kembali ke tugas</a>
     </x-slot:actions>

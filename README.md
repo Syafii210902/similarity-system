@@ -32,7 +32,7 @@ Dua service terpisah yang berkomunikasi secara asinkron (*Decoupled Asynchronous
 │  Laravel (laravel)       │ ───────────────────────────────────▶ │  FastAPI (fastapi)           │
 │  Web, auth, MySQL,       │        202 Accepted (non-blocking)   │  Ekstraksi PDF/DOCX,         │
 │  penyimpanan berkas,     │ ◀─────────────────────────────────── │  embedding multi-lapis,      │
-│  evaluasi                │   POST /api/webhooks/...-result      │  LLM (Claude / Gemini)       │
+│  evaluasi                │   POST /api/webhooks/...-result      │  LLM (Gemini)                │
 └────────────┬─────────────┘        (callback hasil)              └──────────────────────────────┘
              │
         ┌────▼────┐
@@ -52,7 +52,7 @@ Kedua arah komunikasi dilindungi kunci API (`X-API-Key`).
 | **Deteksi AI** | Setiap dokumen dinilai LLM: probabilitas ditulis AI dan pola kalimat yang ditandai. |
 
 **Teknologi:** Laravel 12 (PHP 8.2), MySQL 8, Tailwind CSS 4 + Vite, FastAPI (Python 3.10), SentenceTransformers,
-Anthropic SDK / Google GenAI SDK, Docker Compose.
+Google GenAI SDK (Gemini), Docker Compose.
 
 ---
 
@@ -74,9 +74,8 @@ Rincian lengkap perubahan dan alasannya ada di [PERUBAHAN.md](PERUBAHAN.md).
 - **Docker Desktop** (Docker Compose v2)
 - **Node.js 20+** dan npm, di komputer host, untuk membangun aset CSS/JS. Container Laravel tidak berisi Node.
 - **Git**
-- API key LLM, minimal salah satu:
-  - **Claude**: [console.anthropic.com](https://console.anthropic.com). Langganan Claude Pro (claude.ai) **tidak** mencakup akses API.
-  - **Gemini**: [aistudio.google.com](https://aistudio.google.com). Ada kuota gratis harian.
+- API key **Gemini** dari [aistudio.google.com](https://aistudio.google.com). Akun gratis memiliki batas per menit
+  dan per hari; atur `GEMINI_DELAY_SECONDS` sesuai batas akun.
 - Port **8081** (web), **8000** (FastAPI), dan **3306** (MySQL) belum dipakai aplikasi lain.
 
 ---
@@ -103,7 +102,7 @@ openssl rand -hex 32   # tempel ke ANALYSIS_ENGINE_KEY
 openssl rand -hex 32   # tempel ke ANALYSIS_WEBHOOK_KEY
 ```
 
-Isi juga `ANTHROPIC_API_KEY` **atau** `GEMINI_API_KEY`. `APP_KEY` diisi di langkah 3.
+Isi juga `GEMINI_API_KEY`. `APP_KEY` diisi di langkah 3.
 
 ### 2. Bangun & jalankan container
 
@@ -186,10 +185,7 @@ Dibuat oleh `php artisan migrate --seed`. **Ganti password sebelum dipakai di lu
 | `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | ya | Kredensial MySQL. |
 | `ANALYSIS_ENGINE_KEY` | ya | Kunci Laravel → FastAPI. |
 | `ANALYSIS_WEBHOOK_KEY` | ya | Kunci FastAPI → webhook Laravel. |
-| `ANTHROPIC_API_KEY` | salah satu | Bila terisi, Tahap 2 & deteksi AI memakai Claude. |
-| `GEMINI_API_KEY` | salah satu | Dipakai bila `ANTHROPIC_API_KEY` kosong. |
-| `LLM_PROVIDER` | tidak | Paksa provider: `anthropic` atau `gemini`. |
-| `CLAUDE_MODEL`, `LLM_EFFORT` | tidak | Bawaan `claude-opus-5-5` dan `low`. |
+| `GEMINI_API_KEY` | ya | API key Gemini untuk Tahap 2 & deteksi AI. |
 | `GEMINI_DELAY_SECONDS` | tidak | Jeda antar-panggilan Gemini (bawaan `1.0`). Akun gratis ±5 RPM: isi `12`. |
 | `GEMINI_RATE_LIMIT_RETRIES`, `GEMINI_RATE_LIMIT_WAIT` | tidak | Saat kena 429: berapa kali menunggu (bawaan `3`) dan lama tunggu awal dalam detik (bawaan `30`). |
 
@@ -230,9 +226,8 @@ similarity-system/
 ├── fastapi-service/
 │   ├── main.py                     # endpoint, alur Tahap 1 → Tahap 2 → deteksi AI, callback
 │   ├── multilayer.py               # pemecahan kalimat/passage & skor per lapis
-│   ├── llm.py                      # Claude / Gemini + skema structured output
-│   ├── requirements.txt
-│   └── requirements-llm.txt        # SDK Anthropic (layer Docker terpisah)
+│   ├── llm.py                      # pemanggilan Gemini, rate limit, skema jawaban
+│   └── requirements.txt
 └── laravel-app/
     ├── app/
     │   ├── Http/Controllers/       # Dosen/, Mahasiswa/, Peneliti/, Api/ (webhook)

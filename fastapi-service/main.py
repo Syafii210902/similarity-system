@@ -419,7 +419,7 @@ def process_similarity_task(payload: AnalysisRequest):
         "threshold": payload.threshold,
         "documents_received": len(payload.documents),
         # Dicatat agar setiap run dapat direproduksi & biaya LLM dapat dipantau.
-        "llm": {"provider": llm.LLM_PROVIDER, "model": llm.active_model(), "effort": llm.LLM_EFFORT if llm.LLM_PROVIDER == "anthropic" else None},
+        "llm": {"provider": llm.LLM_PROVIDER, "model": llm.active_model()},
         "llm_usage": {"calls": 0, "failures": 0, "input_tokens": 0, "output_tokens": 0},
     }
 

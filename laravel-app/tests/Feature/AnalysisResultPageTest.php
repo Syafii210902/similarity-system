@@ -88,14 +88,14 @@ class AnalysisResultPageTest extends TestCase
     public function test_results_page_shows_llm_model_and_token_usage(): void
     {
         $this->assignment->analysisRuns()->latest('id')->first()->update(['metrics' => [
-            'llm' => ['provider' => 'anthropic', 'model' => 'claude-opus-5-5', 'effort' => 'low'],
+            'llm' => ['provider' => 'gemini', 'model' => 'gemini-3.6-flash,gemini-3.5-flash'],
             'llm_usage' => ['calls' => 4, 'failures' => 0, 'input_tokens' => 12345, 'output_tokens' => 2100],
         ]]);
 
         $this->actingAs($this->dosen)
             ->get(route('dosen.assignments.results', $this->assignment))
             ->assertOk()
-            ->assertSee('LLM claude-opus-5-5 (effort low)')
+            ->assertSee('LLM gemini-3.6-flash,gemini-3.5-flash')
             ->assertSeeText('12.345');
     }
 

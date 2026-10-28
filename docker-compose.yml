@@ -29,13 +29,10 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     environment:
-      # LLM Tier 2. Claude dipakai otomatis bila ANTHROPIC_API_KEY terisi (API key dari console.anthropic.com),
-      # selain itu Gemini. Paksa provider dengan LLM_PROVIDER=anthropic|gemini.
-      - LLM_PROVIDER=${LLM_PROVIDER:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-opus-5-5}
-      - LLM_EFFORT=${LLM_EFFORT:-low}
+      # LLM (Tahap 2 & deteksi AI): Google Gemini.
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # Model dicoba berurutan; isi satu model saja agar seluruh pengujian memakai model yang sama.
+      - GEMINI_MODELS=${GEMINI_MODELS:-gemini-3.6-flash,gemini-3.5-flash}
       # Jeda antar-panggilan Gemini (detik). Akun gratis ±5 RPM -> 12.
       - GEMINI_DELAY_SECONDS=${GEMINI_DELAY_SECONDS:-1.0}
       - GEMINI_RATE_LIMIT_RETRIES=${GEMINI_RATE_LIMIT_RETRIES:-3}
