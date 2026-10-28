@@ -291,6 +291,91 @@ class ExperimentLabTest extends TestCase
             ->assertSee('ambang bawaan 0,70');
     }
 
+    private function postAiRepeat(ExperimentRun $run, array $body): void
+    {
+        $this->withHeader('X-API-Key', 'webhook-key')
+            ->postJson('/api/webhooks/experiment-ai-repeat', ['analysis_run_id' => $run->id] + $body)
+            ->assertOk();
+    }
+
+    public function test_consistency_queues_missing_repeats_and_resumes_after_stop(): void
+    {
+        Http::fake(['*/api/v1/detect-ai-repeat' => Http::response(['status' => 'accepted'], 202)]);
+        $run = $this->completedRun($this->sampleDataset());
+        $docs = $run->aiScores()->pluck('document_id')->sort()->values();
+
+        $this->actingAs($this->peneliti)->post(route('peneliti.runs.consistency', $run), ['target' => 3])->assertRedirect();
+
+        // 14 dokumen × 2 ulangan; ulangan ke-2 seluruhnya dijadwalkan sebelum ulangan ke-3.
+        Http::assertSent(fn (Request $r) => count($r['items']) === 28
+            && $r['items'][0]['repeat'] === 2 && $r['items'][27]['repeat'] === 3
+            && $r['passage_max_words'] === 60
+            && str_ends_with($r['callback_url'], '/api/webhooks/experiment-ai-repeat'));
+        $this->assertTrue($run->fresh()->consistencyRunning());
+
+        // Tidak boleh dimulai dua kali saat masih berjalan.
+        $this->post(route('peneliti.runs.consistency', $run), ['target' => 3])->assertSessionHas('error');
+
+        // Ulangan ke-2 selesai, satu dokumen gagal, lalu proses berhenti (kuota habis).
+        foreach ($docs as $i => $id) {
+            $this->postAiRepeat($run, ['status' => 'item', 'model' => 'gemini-test', 'item' => [
+                'submission_id' => $id, 'repeat' => 2,
+                'ai_probability' => $i === 0 ? null : 0.2, 'verdict' => $i === 0 ? 'ERROR' : 'HUMAN_WRITTEN',
+            ]]);
+        }
+        $this->postAiRepeat($run, ['status' => 'stopped', 'message' => 'kuota habis']);
+        $this->assertSame('stopped', $run->fresh()->consistency['status']);
+
+        // Dilanjutkan: hanya ulangan yang gagal + seluruh ulangan ke-3.
+        $this->post(route('peneliti.runs.consistency', $run), ['target' => 3])->assertRedirect();
+        Http::assertSent(fn (Request $r) => count($r['items']) === 15 && $r['items'][0] === [
+            'submission_id' => $docs[0], 'student_name' => $r['items'][0]['student_name'],
+            'file_url' => $r['items'][0]['file_url'], 'repeat' => 2,
+        ]);
+
+        // Pilihan dokumen untuk uji kecil.
+        $run->update(['consistency' => ['status' => 'idle', 'target' => 3]]);
+        $this->post(route('peneliti.runs.consistency', $run), ['target' => 3, 'documents' => [$docs[1], $docs[2]]]);
+        Http::assertSent(fn (Request $r) => count($r['items']) === 2 && $r['items'][0]['repeat'] === 3);
+    }
+
+    public function test_consistency_evaluation_measures_spread_and_agreement(): void
+    {
+        // Ulangan ke-1 (run): AI 0,85, manusia 0,10. Ulangan ke-2: dokumen AI pertama turun ke 0,45 (keputusan berubah).
+        $run = $this->completedRun($this->sampleDataset());
+        $scores = $run->aiScores()->with('document')->get()->sortBy('document_id')->values();
+        $firstAi = $scores->first(fn ($s) => $s->document->isAiWritten());
+
+        foreach ($scores as $s) {
+            $p = $s->id === $firstAi->id ? 0.45 : $s->ai_probability;
+            $this->postAiRepeat($run, ['status' => 'item', 'model' => 'gemini-test', 'item' => [
+                'submission_id' => $s->document_id, 'repeat' => 2, 'ai_probability' => $p,
+                'verdict' => $p >= 0.7 ? 'LIKELY_AI' : ($p >= 0.35 ? 'MIXED_AI' : 'HUMAN_WRITTEN'),
+            ]]);
+        }
+        $this->postAiRepeat($run, ['status' => 'completed']);
+
+        $cs = app(ExperimentEvaluator::class)->aiConsistency($run->fresh());
+        $changed = collect($cs['documents'])->firstWhere('document.id', $firstAi->document_id);
+
+        $this->assertSame(14, $cs['summary']['n']);
+        $this->assertSame(13, $cs['summary']['verdict_same']);
+        $this->assertSame(13, $cs['summary']['decision_same']);
+        $this->assertEqualsWithDelta(0.4, $cs['summary']['max_range'], 1e-9);
+        $this->assertEqualsWithDelta(sqrt(0.08), $changed['sd'], 1e-9);
+        $this->assertEqualsWithDelta(1.0, $cs['perRepeat'][1]['f1'], 1e-9);
+        $this->assertEqualsWithDelta(2 * 0.75 / 1.75, $cs['perRepeat'][2]['f1'], 1e-9); // recall 3/4
+        // Model run tidak tercatat di data uji → dianggap berbeda dari model ulangan.
+        $this->assertTrue($cs['modelMismatch']);
+
+        $this->actingAs($this->peneliti)
+            ->get(route('peneliti.runs.show', $run))
+            ->assertOk()
+            ->assertSee('Uji konsistensi deteksi AI')
+            ->assertSee('Lanjutkan uji konsistensi')
+            ->assertSee('berubah');
+    }
+
     public function test_quick_compare_renders_engine_result(): void
     {
         Http::fake(['*/api/v1/compare-texts' => Http::response([

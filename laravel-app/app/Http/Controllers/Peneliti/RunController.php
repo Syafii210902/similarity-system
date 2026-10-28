@@ -95,6 +95,11 @@ class RunController extends Controller
                     ? $this->evaluator->aiEvaluation($run, $request->filled('at') ? max(0.0, min(1.0, (float) $request->input('at'))) : null)
                     : null,
             ];
+
+            if ($run->config['run_ai_detection'] ?? false) {
+                $this->experiments->expireStaleConsistency($run);
+                $data['consistency'] = $this->evaluator->aiConsistency($run->refresh());
+            }
         }
 
         return view('peneliti.runs.show', $data);
@@ -103,8 +108,36 @@ class RunController extends Controller
     public function status(ExperimentRun $run): JsonResponse
     {
         $this->experiments->expireStaleRuns($run->dataset);
+        $this->experiments->expireStaleConsistency($run);
+        $run->refresh();
 
-        return response()->json(['status' => $run->fresh()->status]);
+        return response()->json([
+            'status' => $run->status,
+            'consistency' => $run->consistency['status'] ?? null,
+            'repeats' => $run->aiRepeats()->count(),
+        ]);
+    }
+
+    /**
+     * Mulai/lanjutkan uji konsistensi deteksi AI. Pilihan dokumen kosong = semua dokumen run.
+     */
+    public function consistency(Request $request, ExperimentRun $run): RedirectResponse
+    {
+        $data = $request->validate([
+            'target' => ['required', 'integer', 'between:2,5'],
+            'documents' => ['nullable', 'array'],
+            'documents.*' => ['integer'],
+        ]);
+
+        try {
+            $documentIds = empty($data['documents']) ? null : array_map('intval', $data['documents']);
+            $queued = $this->experiments->startAiRepeat($run, (int) $data['target'], $documentIds);
+        } catch (RuntimeException $e) {
+            return redirect()->to(route('peneliti.runs.show', $run) . '#konsistensi')->with('error', $e->getMessage());
+        }
+
+        return redirect()->to(route('peneliti.runs.show', $run) . '#konsistensi')
+            ->with('success', "Uji konsistensi dimulai: {$queued} panggilan deteksi AI dijadwalkan.");
     }
 
     public function export(ExperimentRun $run): StreamedResponse

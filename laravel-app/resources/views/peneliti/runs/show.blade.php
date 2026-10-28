@@ -45,27 +45,31 @@
         // Dihitung dari skor tersimpan: tanpa Tahap 1, LLM harus memeriksa semua pasangan.
         $aboveThreshold = $rows->filter(fn ($r) => $r['combined'] >= $runThreshold - 1e-9)->count();
         $filtered = $rows->count() - $aboveThreshold;
+        // Biaya LLM total = verifikasi pasangan (Tahap 2) + deteksi AI (satu panggilan per dokumen).
+        $llmTotal = (int) ($m['llm_similarity_calls'] ?? 0) + (int) ($m['llm_ai_detection_calls'] ?? 0);
     @endphp
     <x-figures class="mb-3" :items="[
         'Pasangan' => $rows->count(),
         'Plagiat (label)' => $rows->where('actual', true)->count(),
         'Di atas ambang' => $aboveThreshold,
         'Panggilan LLM dihemat' => $filtered . ' (' . $pct($filtered, $rows->count()) . ')',
+        'Total panggilan LLM' => $llmTotal,
         'Durasi' => $run->durationLabel() ?? '—',
     ]" />
     <p class="mb-1 text-[13px] text-muted">
         Tanpa Tahap 1, LLM harus memeriksa semua {{ $rows->count() }} pasangan. Tahap 1 hanya meneruskan {{ $aboveThreshold }} pasangan
         (skor gabungan ≥ {{ $f($runThreshold, 2) }}), sehingga {{ $filtered }} panggilan tidak diperlukan.
         @if ($tier2)
-            Pada run ini LLM dipanggil {{ $m['llm_similarity_calls'] ?? $aboveThreshold }} kali.
+            Pada run ini LLM dipanggil {{ $m['llm_similarity_calls'] ?? $aboveThreshold }} kali untuk verifikasi pasangan.
         @else
             Tahap 2 tidak dijalankan pada run ini; angka di atas adalah penghematan bila Tahap 2 dijalankan dengan ambang yang sama.
         @endif
+        Total panggilan LLM = {{ (int) ($m['llm_similarity_calls'] ?? 0) }} verifikasi pasangan + {{ (int) ($m['llm_ai_detection_calls'] ?? 0) }} deteksi AI (satu per dokumen, tidak dipengaruhi ambang).
     </p>
     <p class="mb-8 text-[13px] text-muted">
         Model embedding {{ $m['embedding_model'] ?? '—' }}
         · skor passage {{ ($m['multilayer']['passage_formula'] ?? null) === 'bertscore_f1' ? 'F1 ala BERTScore' : 'rata-rata dua arah (rumus lama)' }}
-        @if (!empty($m['llm']['model']) && (($c['run_tier2'] ?? false) || ($c['run_ai_detection'] ?? false))) · LLM {{ $m['llm']['model'] }}@if (!empty($m['llm']['effort'])) (effort {{ $m['llm']['effort'] }})@endif @endif
+        @if (!empty($m['llm']['model']) && (($c['run_tier2'] ?? false) || ($c['run_ai_detection'] ?? false))) · LLM {{ $m['llm']['model'] }} @endif
         · ekstraksi {{ $f($m['extraction_seconds'] ?? null, 1) }} dtk · Tahap 1 {{ $f($m['tier1_seconds'] ?? null, 1) }} dtk
         @if ($c['run_tier2'] ?? false) · Tahap 2 {{ $f($m['tier2_similarity_seconds'] ?? null, 1) }} dtk @endif
         @if (($m['llm_usage']['input_tokens'] ?? 0) > 0) · token {{ number_format($m['llm_usage']['input_tokens'], 0, ',', '.') }} masuk / {{ number_format($m['llm_usage']['output_tokens'], 0, ',', '.') }} keluar @endif
@@ -340,6 +344,81 @@
         </section>
     @endif
 
+    {{-- ============ UJI KONSISTENSI DETEKSI AI ============ --}}
+    @isset($consistency)
+        @php
+            $cs = $consistency;
+            $state = $run->consistency ?? [];
+            $running = $run->consistencyRunning();
+        @endphp
+        <section id="konsistensi" class="mb-10">
+            <h2 class="text-base font-semibold">Uji konsistensi deteksi AI</h2>
+            <p class="mb-3 text-muted">
+                Dokumen yang sama dinilai ulang oleh LLM dengan prompt dan cuplikan yang sama. Ulangan ke-1 adalah hasil run ini.
+                Keputusan “teks AI” memakai ambang {{ $f($cs['threshold'], 2) }}. Simpangan baku kecil dan keputusan yang tidak berubah berarti penilaian LLM konsisten.
+                Ulangan yang sudah berhasil tidak dijalankan lagi, sehingga proses dapat dilanjutkan bila terhenti karena kuota.
+            </p>
+
+            @if ($running)
+                <div class="panel mb-4 px-5 py-3 text-sm" data-consistency-poll="{{ route('peneliti.runs.status', $run) }}" data-repeats="{{ $run->aiRepeats()->count() }}">
+                    Sedang berjalan ({{ $state['queued'] ?? '?' }} panggilan dijadwalkan). Halaman diperbarui otomatis setiap ada hasil baru.
+                </div>
+            @elseif (($state['status'] ?? null) === 'stopped')
+                <p class="alert alert-warn mb-4">Terhenti: {{ $state['message'] }}</p>
+            @endif
+            @if ($cs['modelMismatch'])
+                <p class="alert alert-warn mb-4">Model LLM ulangan ({{ implode(', ', $cs['repeatModels']) }}) berbeda dengan model run ini ({{ $cs['runModel'] ?? '—' }}), sehingga hasilnya tidak dapat dibandingkan sebagai uji konsistensi.</p>
+            @endif
+
+            @if ($cs['summary']['n'] > 0)
+                @include('peneliti.partials.consistency-summary')
+            @endif
+
+            <form method="POST" action="{{ route('peneliti.runs.consistency', $run) }}" class="panel">
+                @csrf
+                <div class="flex flex-wrap items-end gap-3 border-b border-line-soft px-5 py-4">
+                    <div>
+                        <label for="target" class="form-label">Jumlah penilaian per dokumen</label>
+                        <select id="target" name="target" class="form-input w-56">
+                            @foreach ([2, 3, 4, 5] as $t)
+                                <option value="{{ $t }}" @selected($t === max(3, $cs['target']))>{{ $t }}× (run + {{ $t - 1 }} ulangan)</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary" @disabled($running)>{{ $run->aiRepeats()->exists() ? 'Lanjutkan uji konsistensi' : 'Mulai uji konsistensi' }}</button>
+                    <p class="form-hint basis-full">Centang dokumen tertentu untuk uji kecil (misalnya demo); tanpa centang = semua dokumen. Setiap ulangan = 1 panggilan LLM per dokumen.</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th class="w-8"></th><th>Dokumen</th><th>Label</th>
+                                @for ($i = 1; $i <= $cs['target']; $i++)<th class="text-right">Ke-{{ $i }}</th>@endfor
+                                <th class="text-right">Rata-rata</th><th class="text-right">sd</th><th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($cs['documents'] as $d)
+                                <tr>
+                                    <td><input type="checkbox" name="documents[]" value="{{ $d['document']->id }}" aria-label="Pilih {{ $d['document']->title }}"></td>
+                                    <td class="text-[13px]">{{ $d['document']->title }}</td>
+                                    <td><x-status :tone="$d['ai_written'] ? 'danger' : 'ok'">{{ $d['ai_written'] ? 'AI' : 'Manusia' }}</x-status></td>
+                                    @for ($i = 1; $i <= $cs['target']; $i++)
+                                        @php $v = $d['values'][$i] ?? null; @endphp
+                                        <td class="num text-right {{ $v && $v['verdict'] === 'ERROR' ? 'text-danger' : '' }}">{{ $v ? ($v['verdict'] === 'ERROR' ? 'gagal' : $f($v['p'], 2)) : '—' }}</td>
+                                    @endfor
+                                    <td class="num text-right">{{ $f($d['mean'], 2) }}</td>
+                                    <td class="num text-right">{{ $f($d['sd']) }}</td>
+                                    <td class="text-[13px] {{ $d['verdict_same'] === false ? 'text-danger' : 'text-muted' }}">{{ $d['verdict_same'] === null ? '—' : ($d['verdict_same'] ? 'sama' : 'berubah') }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </form>
+        </section>
+    @endisset
+
     {{-- ============ SEMUA PASANGAN ============ --}}
     <section>
         <details class="panel">
@@ -382,6 +461,24 @@
                 setTimeout(check, 4000);
             };
             setTimeout(check, 4000);
+        })();
+
+        // Uji konsistensi: muat ulang bila ada hasil baru atau proses selesai/terhenti.
+        (() => {
+            const box = document.querySelector('[data-consistency-poll]');
+            if (!box) return;
+            const check = async () => {
+                try {
+                    const res = await fetch(box.dataset.consistencyPoll, { headers: { Accept: 'application/json' } });
+                    const { consistency, repeats } = await res.json();
+                    if (consistency !== 'processing' || String(repeats) !== box.dataset.repeats) {
+                        window.location.hash = 'konsistensi';
+                        return window.location.reload();
+                    }
+                } catch (e) { /* coba lagi */ }
+                setTimeout(check, 8000);
+            };
+            setTimeout(check, 8000);
         })();
     </script>
 @endpush

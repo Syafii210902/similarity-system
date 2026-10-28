@@ -73,6 +73,22 @@ class AnalysisRequest(BaseModel):
     config: Optional[RunConfig] = None
 
 
+class AiRepeatItem(BaseModel):
+    submission_id: int
+    student_name: str
+    file_url: str
+    repeat: int = Field(..., ge=2, le=10)
+
+
+class AiRepeatRequest(BaseModel):
+    """Uji konsistensi: deteksi AI diulang pada dokumen sebuah run Lab (tanpa Tahap 1/2)."""
+    analysis_run_id: int
+    callback_url: str
+    # Ukuran passage run asal, agar cuplikan yang dinilai LLM sama persis dengan run utama.
+    passage_max_words: Optional[int] = Field(None, ge=10, le=100)
+    items: List[AiRepeatItem]
+
+
 class CompareRequest(BaseModel):
     text_a: str = Field(..., min_length=20, max_length=200_000)
     text_b: str = Field(..., min_length=20, max_length=200_000)
@@ -452,6 +468,75 @@ def analyze_similarity(
         "status": "accepted",
         "message": f"Analysis queued (assignment {payload.assignment_id}, run {payload.analysis_run_id})"
     }
+
+
+# Berhenti bila beberapa dokumen berturut-turut gagal (biasanya kuota harian habis),
+# agar sisa dokumen tidak ikut tercatat ERROR dan dapat dilanjutkan esok hari.
+AI_REPEAT_MAX_CONSECUTIVE_ERRORS = 2
+
+
+def post_ai_repeat_callback(payload: AiRepeatRequest, body: dict) -> None:
+    try:
+        requests.post(
+            payload.callback_url,
+            json={"analysis_run_id": payload.analysis_run_id, **body},
+            headers={"X-API-Key": WEBHOOK_API_KEY},
+            timeout=30,
+        )
+    except Exception as e:
+        print(f"[CALLBACK FAILED] AI repeat run {payload.analysis_run_id}: {e}", flush=True)
+
+
+def process_ai_repeat_task(payload: AiRepeatRequest):
+    """Background Task uji konsistensi: hasil dikirim per dokumen supaya progres tidak hilang."""
+    print(f"[AI REPEAT STARTED] Run ID: {payload.analysis_run_id}, {len(payload.items)} item", flush=True)
+    passage_max_words = payload.passage_max_words or PASSAGE_MAX_WORDS
+    cache: dict = {}
+    consecutive_errors = 0
+    done = 0
+
+    for item in payload.items:
+        if item.submission_id not in cache:
+            text, _ = download_and_extract_text(item.file_url)
+            cache[item.submission_id] = (
+                multilayer.sample_excerpt(multilayer.encode_document(model, text, passage_max_words))
+                if len(text.strip()) > 5 else None
+            )
+        excerpt = cache[item.submission_id]
+
+        if excerpt is None:
+            result = {"ai_probability": None, "verdict": "ERROR",
+                      "analysis_summary": "Deteksi AI gagal: teks dokumen tidak dapat diekstrak", "flagged_patterns": []}
+        else:
+            result = detect_ai_generated_text(item.student_name, excerpt)
+            llm.pause_between_calls()
+
+        post_ai_repeat_callback(payload, {
+            "status": "item",
+            "model": llm.active_model(),
+            "item": {"submission_id": item.submission_id, "repeat": item.repeat, **result},
+        })
+        done += 1
+
+        consecutive_errors = consecutive_errors + 1 if result["verdict"] == "ERROR" else 0
+        if consecutive_errors >= AI_REPEAT_MAX_CONSECUTIVE_ERRORS:
+            post_ai_repeat_callback(payload, {
+                "status": "stopped",
+                "message": f"Dihentikan setelah {consecutive_errors} dokumen berturut-turut gagal "
+                           f"(kemungkinan kuota LLM habis). {done} dari {len(payload.items)} item diproses.",
+            })
+            print(f"[AI REPEAT STOPPED] Run ID: {payload.analysis_run_id}", flush=True)
+            return
+
+    post_ai_repeat_callback(payload, {"status": "completed"})
+    print(f"[AI REPEAT COMPLETED] Run ID: {payload.analysis_run_id}", flush=True)
+
+
+@app.post("/api/v1/detect-ai-repeat", status_code=202)
+def detect_ai_repeat(payload: AiRepeatRequest, background_tasks: BackgroundTasks):
+    """Uji konsistensi deteksi AI (dipanggil Laravel secara asynchronous)."""
+    background_tasks.add_task(process_ai_repeat_task, payload)
+    return {"status": "accepted", "items": len(payload.items)}
 
 
 def verify_engine_key(x_api_key: Optional[str]) -> None:

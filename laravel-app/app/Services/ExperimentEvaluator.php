@@ -29,6 +29,9 @@ class ExperimentEvaluator
     /** Ambang verdict bawaan (nilai awal peneliti, bukan dari literatur). */
     public const AI_VERDICT_THRESHOLDS = ['LIKELY_AI' => 0.70, 'MIXED_AI' => 0.35];
 
+    /** Ambang keputusan "teks AI" pada uji konsistensi (sesuai proposal: ai_probability ≥ 0,5). */
+    public const AI_DECISION_THRESHOLD = 0.50;
+
     public const FOLDS = 5;
     public const SEED = 42;
 
@@ -192,7 +195,14 @@ class ExperimentEvaluator
      */
     public function aiEvaluation(ExperimentRun $run, ?float $tryThreshold = null): array
     {
-        $scores = $run->aiScores()->with('document')->get();
+        return $this->aiEvaluationFor($run->aiScores()->with('document')->get(), $tryThreshold);
+    }
+
+    /**
+     * @param  Collection<int, \App\Models\ExperimentAiScore>  $scores  hasil deteksi AI (boleh gabungan beberapa run)
+     */
+    public function aiEvaluationFor(Collection $scores, ?float $tryThreshold = null): array
+    {
         $valid = $scores->where('verdict', '!=', 'ERROR')->map(fn ($s) => [
             'score' => $s,
             'actual' => $s->document->isAiWritten(),
@@ -249,6 +259,139 @@ class ExperimentEvaluator
     }
 
     // ----------------------------------------------------------------- internal
+
+    /**
+     * Uji konsistensi deteksi AI: dokumen yang sama dinilai beberapa kali (ulangan ke-1 = run utama).
+     * Mengukur sebaran skor per dokumen, kesamaan keputusan antar-ulangan, dan F1 tiap ulangan.
+     */
+    public function aiConsistency(ExperimentRun $run): array
+    {
+        return $this->aiConsistencyFor([$run]);
+    }
+
+    /**
+     * Uji konsistensi gabungan beberapa run (misalnya satu run per tugas).
+     *
+     * @param  array<ExperimentRun>  $runs
+     */
+    public function aiConsistencyFor(array $runs): array
+    {
+        $target = 1;
+        $documents = [];
+        $repeatModels = [];
+        $runModels = [];
+        $modelMismatch = false;
+
+        foreach ($runs as $run) {
+            $target = max($target, (int) ($run->consistency['target'] ?? 1), (int) ($run->aiRepeats()->max('repeat') ?? 1));
+            $models = $run->aiRepeats()->whereNotNull('model')->distinct()->pluck('model')->all();
+            $runModel = $run->metrics['llm']['model'] ?? null;
+            $modelMismatch = $modelMismatch || ($models !== [] && $models !== [$runModel]);
+            $repeatModels = array_merge($repeatModels, $models);
+            $runModels[] = $runModel;
+            array_push($documents, ...$this->consistencyDocuments($run));
+        }
+        $repeatModels = array_values(array_unique($repeatModels));
+        $runModels = array_values(array_unique(array_filter($runModels)));
+
+        return $this->consistencySummary($documents, $target) + [
+            'errors' => array_sum(array_map(fn ($run) => $run->aiRepeats()->where('verdict', 'ERROR')->count(), $runs)),
+            'runModel' => $runModels ? implode(', ', $runModels) : null,
+            'repeatModels' => $repeatModels,
+            'modelMismatch' => $modelMismatch,
+        ];
+    }
+
+    /** Skor tiap dokumen per ulangan (ulangan ke-1 = hasil run). */
+    private function consistencyDocuments(ExperimentRun $run): array
+    {
+        $repeats = $run->aiRepeats()->get()->groupBy('document_id');
+        $documents = [];
+        foreach ($run->aiScores()->with('document')->get()->sortBy('document_id') as $score) {
+            $doc = $score->document;
+            if (!$doc) {
+                continue;
+            }
+            $values = [1 => ['p' => $score->ai_probability, 'verdict' => $score->verdict]];
+            foreach ($repeats->get($doc->id, collect()) as $r) {
+                $values[$r->repeat] = ['p' => $r->ai_probability, 'verdict' => $r->verdict];
+            }
+            ksort($values);
+            $valid = array_filter($values, fn ($v) => $v['verdict'] !== 'ERROR' && $v['p'] !== null);
+            $probs = array_column($valid, 'p');
+
+            $documents[] = [
+                'document' => $doc,
+                'ai_written' => $doc->isAiWritten(),
+                'values' => $values,
+                'n' => count($probs),
+                'mean' => $probs ? array_sum($probs) / count($probs) : null,
+                'sd' => count($probs) >= 2 ? $this->sampleSd($probs) : null,
+                'range' => count($probs) >= 2 ? max($probs) - min($probs) : null,
+                'verdict_same' => count($probs) >= 2 ? count(array_unique(array_column($valid, 'verdict'))) === 1 : null,
+                'decision_same' => count($probs) >= 2
+                    ? count(array_unique(array_map(fn ($p) => $p >= self::AI_DECISION_THRESHOLD - 1e-9, $probs))) === 1
+                    : null,
+            ];
+        }
+
+        return $documents;
+    }
+
+    private function consistencySummary(array $documents, int $target): array
+    {
+        $compared = array_values(array_filter($documents, fn ($d) => $d['n'] >= 2));
+        $summarize = function (array $rows) {
+            $n = count($rows);
+
+            return [
+                'n' => $n,
+                'mean_sd' => $n ? array_sum(array_column($rows, 'sd')) / $n : null,
+                'max_range' => $n ? max(array_column($rows, 'range')) : null,
+                'verdict_same' => count(array_filter($rows, fn ($d) => $d['verdict_same'])),
+                'decision_same' => count(array_filter($rows, fn ($d) => $d['decision_same'])),
+            ];
+        };
+
+        $perCategory = [];
+        foreach (ExperimentDocument::CATEGORIES as $key => $label) {
+            $rows = array_values(array_filter($compared, fn ($d) => $d['document']->category === $key));
+            if ($rows) {
+                $perCategory[] = ['label' => $label, 'ai_written' => in_array($key, ExperimentDocument::AI_WRITTEN, true)] + $summarize($rows);
+            }
+        }
+
+        // Metrik deteksi tiap ulangan pada ambang keputusan yang sama.
+        $perRepeat = [];
+        for ($repeat = 1; $repeat <= $target; $repeat++) {
+            $rows = collect($documents)
+                ->filter(fn ($d) => isset($d['values'][$repeat]) && $d['values'][$repeat]['verdict'] !== 'ERROR' && $d['values'][$repeat]['p'] !== null)
+                ->map(fn ($d) => ['p' => $d['values'][$repeat]['p'], 'actual' => $d['ai_written']]);
+            $perRepeat[$repeat] = $rows->isEmpty() ? null
+                : $this->metrics->confusion($rows, fn ($r) => $r['p'] >= self::AI_DECISION_THRESHOLD - 1e-9);
+        }
+        $f1s = array_values(array_filter(array_map(fn ($m) => $m['f1'] ?? null, $perRepeat), fn ($v) => $v !== null));
+
+        return [
+            'target' => $target,
+            'threshold' => self::AI_DECISION_THRESHOLD,
+            'documents' => $documents,
+            'summary' => $summarize($compared),
+            'complete' => count(array_filter($documents, fn ($d) => $d['n'] >= $target)),
+            'perCategory' => $perCategory,
+            'perRepeat' => $perRepeat,
+            'f1_mean' => $f1s ? array_sum($f1s) / count($f1s) : null,
+            'f1_sd' => count($f1s) >= 2 ? $this->sampleSd($f1s) : null,
+        ];
+    }
+
+    /** @param  array<float>  $values */
+    private function sampleSd(array $values): float
+    {
+        $mean = array_sum($values) / count($values);
+
+        return sqrt(array_sum(array_map(fn ($v) => ($v - $mean) ** 2, $values)) / (count($values) - 1));
+    }
 
     private function rootOf(int $id, Collection $documents): int
     {

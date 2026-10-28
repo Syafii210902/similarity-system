@@ -91,6 +91,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/datasets/{dataset}/runs', [PenelitiRunController::class, 'store'])->name('runs.store');
         Route::get('/runs/{run}', [PenelitiRunController::class, 'show'])->name('runs.show');
         Route::get('/runs/{run}/status', [PenelitiRunController::class, 'status'])->name('runs.status');
+        Route::post('/runs/{run}/consistency', [PenelitiRunController::class, 'consistency'])->name('runs.consistency');
         Route::get('/runs/{run}/export', [PenelitiRunController::class, 'export'])->name('runs.export');
         Route::delete('/runs/{run}', [PenelitiRunController::class, 'destroy'])->name('runs.destroy');
 

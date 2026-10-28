@@ -44,6 +44,7 @@ return [
         // URL yang dipanggil FastAPI (dari dalam network Docker) setelah analisis selesai/gagal.
         'callback_url' => env('ANALYSIS_CALLBACK_URL', 'http://laravel/api/webhooks/similarity-result'),
         'experiment_callback_url' => env('EXPERIMENT_CALLBACK_URL', 'http://laravel/api/webhooks/experiment-result'),
+        'experiment_ai_repeat_callback_url' => env('EXPERIMENT_AI_REPEAT_CALLBACK_URL', 'http://laravel/api/webhooks/experiment-ai-repeat'),
     ],
 
     'analysis' => [

@@ -13,3 +13,7 @@ Route::post('/webhooks/similarity-result', [WebhookController::class, 'handleSim
 Route::post('/webhooks/experiment-result', [ExperimentWebhookController::class, 'handle'])
     ->middleware(VerifyAnalysisWebhookKey::class)
     ->name('api.webhooks.experiment');
+
+Route::post('/webhooks/experiment-ai-repeat', [ExperimentWebhookController::class, 'handleAiRepeat'])
+    ->middleware(VerifyAnalysisWebhookKey::class)
+    ->name('api.webhooks.experiment-ai-repeat');

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ExperimentAiRepeat;
 use App\Models\ExperimentAiScore;
 use App\Models\ExperimentDataset;
 use App\Models\ExperimentDocument;
@@ -13,6 +14,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -251,6 +253,136 @@ class ExperimentService
             ->where('created_at', '<', now()->subMinutes($minutes))
             ->get()
             ->each(fn (ExperimentRun $run) => $this->fail($run, "Tidak ada respons dari layanan analisis dalam {$minutes} menit."));
+    }
+
+    // ----------------------------------------------------------------- uji konsistensi deteksi AI
+
+    /** Tanpa kabar dari FastAPI selama ini (menit), proses dianggap terhenti. */
+    public const CONSISTENCY_STALE_MINUTES = 10;
+
+    /**
+     * Ulangan deteksi AI yang belum ada atau gagal, untuk ulangan ke-2 s.d. $target.
+     * Diurutkan per ulangan agar ulangan ke-2 lengkap dulu sebelum ulangan ke-3.
+     *
+     * @param  array<int>|null  $documentIds  null = semua dokumen run
+     * @return array<int, array{document: ExperimentDocument, repeat: int}>
+     */
+    public function pendingAiRepeats(ExperimentRun $run, int $target, ?array $documentIds = null): array
+    {
+        $documents = $run->aiScores()->with('document')->get()->pluck('document')->filter()
+            ->when($documentIds !== null, fn ($docs) => $docs->whereIn('id', $documentIds))
+            ->sortBy('id')->values();
+        $done = $run->aiRepeats()->where('verdict', '!=', 'ERROR')->get()
+            ->map(fn ($r) => $r->document_id . ':' . $r->repeat)->flip();
+
+        $pending = [];
+        for ($repeat = 2; $repeat <= $target; $repeat++) {
+            foreach ($documents as $document) {
+                if (!$done->has($document->id . ':' . $repeat)) {
+                    $pending[] = ['document' => $document, 'repeat' => $repeat];
+                }
+            }
+        }
+
+        return $pending;
+    }
+
+    /**
+     * Mulai atau lanjutkan uji konsistensi. Ulangan yang sudah berhasil tidak dijalankan lagi.
+     *
+     * @param  array<int>|null  $documentIds
+     *
+     * @throws RuntimeException
+     */
+    public function startAiRepeat(ExperimentRun $run, int $target, ?array $documentIds = null): int
+    {
+        $this->expireStaleConsistency($run);
+        if ($run->status !== 'completed' || !($run->config['run_ai_detection'] ?? false)) {
+            throw new RuntimeException('Uji konsistensi hanya untuk eksperimen selesai yang menjalankan deteksi AI.');
+        }
+        if ($run->consistencyRunning()) {
+            throw new RuntimeException('Uji konsistensi pada eksperimen ini masih berjalan.');
+        }
+
+        $pending = $this->pendingAiRepeats($run, $target, $documentIds);
+        if ($pending === []) {
+            throw new RuntimeException('Semua ulangan untuk pilihan ini sudah lengkap.');
+        }
+
+        $payload = [
+            'analysis_run_id' => $run->id,
+            'callback_url' => config('services.fastapi.experiment_ai_repeat_callback_url'),
+            'passage_max_words' => $run->config['passage_max_words'] ?? null,
+            'items' => array_map(fn ($p) => [
+                'submission_id' => $p['document']->id,
+                'student_name' => $p['document']->title,
+                'file_url' => Storage::disk(self::DISK)->url($p['document']->file_path),
+                'repeat' => $p['repeat'],
+            ], $pending),
+        ];
+
+        try {
+            $response = $this->engine()->timeout(15)->post($this->engineUrl('/api/v1/detect-ai-repeat'), $payload);
+        } catch (\Throwable $e) {
+            throw new RuntimeException('Layanan analisis tidak dapat dihubungi: ' . $e->getMessage());
+        }
+        if (!$response->successful()) {
+            throw new RuntimeException("Layanan analisis menolak permintaan (HTTP {$response->status()}).");
+        }
+
+        $run->update(['consistency' => [
+            'status' => 'processing',
+            'target' => max($target, (int) ($run->consistency['target'] ?? 0)),
+            'queued' => count($pending),
+            'message' => null,
+            'updated_at' => now()->toIso8601String(),
+        ]]);
+
+        return count($pending);
+    }
+
+    public function handleAiRepeatCallback(array $payload): void
+    {
+        $run = ExperimentRun::findOrFail($payload['analysis_run_id'] ?? 0);
+        $state = $run->consistency ?? [];
+        $status = $payload['status'] ?? null;
+
+        if ($status === 'item') {
+            $item = $payload['item'] ?? [];
+            $documentId = (int) ($item['submission_id'] ?? 0);
+            $repeat = (int) ($item['repeat'] ?? 0);
+            if ($repeat >= 2 && $run->dataset->documents()->whereKey($documentId)->exists()) {
+                ExperimentAiRepeat::updateOrCreate(
+                    ['run_id' => $run->id, 'document_id' => $documentId, 'repeat' => $repeat],
+                    [
+                        'ai_probability' => is_numeric($item['ai_probability'] ?? null) ? $this->clamp($item['ai_probability'], 0) : null,
+                        'verdict' => in_array($item['verdict'] ?? null, ['HUMAN_WRITTEN', 'MIXED_AI', 'LIKELY_AI'], true) ? $item['verdict'] : 'ERROR',
+                        'analysis_summary' => $item['analysis_summary'] ?? null,
+                        'model' => $payload['model'] ?? null,
+                    ]
+                );
+            }
+        } else {
+            $state['status'] = $status === 'stopped' ? 'stopped' : 'idle';
+            $state['message'] = $payload['message'] ?? null;
+        }
+
+        $state['updated_at'] = now()->toIso8601String();
+        $run->update(['consistency' => $state]);
+    }
+
+    public function expireStaleConsistency(ExperimentRun $run): void
+    {
+        $state = $run->consistency ?? [];
+        if (($state['status'] ?? null) !== 'processing') {
+            return;
+        }
+        $last = isset($state['updated_at']) ? Carbon::parse($state['updated_at']) : null;
+        if ($last === null || $last->lt(now()->subMinutes(self::CONSISTENCY_STALE_MINUTES))) {
+            $state['status'] = 'stopped';
+            $state['message'] = 'Tidak ada kabar dari layanan analisis dalam ' . self::CONSISTENCY_STALE_MINUTES . ' menit. Lanjutkan untuk mencoba lagi.';
+            $run->update(['consistency' => $state]);
+        }
     }
 
     // ----------------------------------------------------------------- uji cepat

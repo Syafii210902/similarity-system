@@ -10,11 +10,12 @@ class ExperimentRun extends Model
 {
     public const ACTIVE_STATUSES = ['pending', 'processing'];
 
-    protected $fillable = ['dataset_id', 'created_by', 'name', 'status', 'config', 'metrics', 'error_message', 'started_at', 'finished_at'];
+    protected $fillable = ['dataset_id', 'created_by', 'name', 'status', 'config', 'metrics', 'consistency', 'error_message', 'started_at', 'finished_at'];
 
     protected $casts = [
         'config' => 'array',
         'metrics' => 'array',
+        'consistency' => 'array',
         'started_at' => 'datetime',
         'finished_at' => 'datetime',
     ];
@@ -37,6 +38,16 @@ class ExperimentRun extends Model
     public function aiScores(): HasMany
     {
         return $this->hasMany(ExperimentAiScore::class, 'run_id');
+    }
+
+    public function aiRepeats(): HasMany
+    {
+        return $this->hasMany(ExperimentAiRepeat::class, 'run_id');
+    }
+
+    public function consistencyRunning(): bool
+    {
+        return ($this->consistency['status'] ?? null) === 'processing';
     }
 
     public function isActive(): bool
