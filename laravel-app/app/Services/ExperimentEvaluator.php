@@ -353,6 +353,7 @@ class ExperimentEvaluator
     private function crossValidate(Collection $rows, array $folds, array $weightCandidates): array
     {
         $f1s = [];
+        $thresholds = [];
         $pooled = ['tp' => 0, 'fp' => 0, 'fn' => 0, 'tn' => 0];
 
         foreach ($folds as $testIdx) {
@@ -364,6 +365,7 @@ class ExperimentEvaluator
             $best = $this->bestParams($train, $weightCandidates);
             $m = $this->evaluate($test, $best['weights'], $best['threshold']);
             $f1s[] = $m['f1'] ?? 0.0;
+            $thresholds[] = $best['threshold'];
             foreach ($pooled as $key => $_) {
                 $pooled[$key] += $m[$key];
             }
@@ -378,6 +380,8 @@ class ExperimentEvaluator
             'folds' => count($f1s),
             'f1_mean' => $mean,
             'f1_sd' => $sd,
+            // Ambang yang terpilih di data latih tiap fold — menunjukkan stabil/tidaknya pemilihan ambang.
+            'thresholds' => $thresholds,
             'pooled' => $pooled + [
                 'precision' => $precision,
                 'recall' => $recall,

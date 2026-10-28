@@ -220,6 +220,10 @@ class ExperimentLabTest extends TestCase
         $this->assertCount(6, $ablation);
         $optimized = $ablation['Bobot hasil optimasi'];
         $this->assertSame(5, $optimized['cv']['folds']);
+        $this->assertCount(5, $optimized['cv']['thresholds']);
+        foreach ($optimized['cv']['thresholds'] as $t) {
+            $this->assertContains($t, ExperimentEvaluator::THRESHOLDS);
+        }
         // Hanya lapis dokumen yang memisahkan parafrase AI (0,80) dari esai independen (0,72) → optimasi mencapai F1 penuh.
         $this->assertEqualsWithDelta(1.0, $optimized['in_sample']['f1'], 1e-9);
         $this->assertGreaterThan($ablation['Lapis kalimat saja']['in_sample']['f1'], $optimized['in_sample']['f1']);

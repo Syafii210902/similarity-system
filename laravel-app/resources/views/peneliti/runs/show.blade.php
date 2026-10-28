@@ -94,7 +94,7 @@
     {{-- ============ ABLATION ============ --}}
     <section class="mb-10">
         <h2 class="text-base font-semibold">Ablation: kontribusi tiap lapis embedding</h2>
-        <p class="mb-3 text-muted">Tahap 1 saja. F1 cross-validation 5-fold (stratified, seed {{ \App\Services\ExperimentEvaluator::SEED }}): ambang, dan untuk baris terakhir juga bobot, dipilih di data latih lalu diuji di data uji. Kolom “terbaik” adalah nilai pada data penuh (optimistis).</p>
+        <p class="mb-3 text-muted">Tahap 1 saja. F1 cross-validation 5-fold (stratified, seed {{ \App\Services\ExperimentEvaluator::SEED }}): ambang, dan untuk baris terakhir juga bobot, dipilih di data latih lalu diuji di data uji. Kolom “terbaik” adalah nilai pada data penuh (optimistis). Kolom “ambang per fold” menunjukkan ambang yang terpilih di data latih tiap fold; nilai yang berdekatan berarti pemilihan ambang stabil.</p>
         <div class="panel overflow-x-auto">
             <table class="data-table">
                 <thead>
@@ -103,6 +103,7 @@
                         <th class="text-right">F1 CV<br><span class="font-normal">rata-rata ± sd</span></th>
                         <th class="text-right">Precision CV<br><span class="font-normal">gabungan fold</span></th>
                         <th class="text-right">Recall CV<br><span class="font-normal">gabungan fold</span></th>
+                        <th>Ambang per fold</th>
                         <th class="text-right">F1 terbaik<br><span class="font-normal">data penuh</span></th>
                         <th>Bobot D/P/K · ambang terbaik</th>
                     </tr>
@@ -117,6 +118,7 @@
                             </td>
                             <td class="num text-right">{{ $f($a['cv']['pooled']['precision']) }}</td>
                             <td class="num text-right">{{ $f($a['cv']['pooled']['recall']) }}</td>
+                            <td class="num whitespace-nowrap text-[13px]">{{ collect($a['cv']['thresholds'])->map(fn ($t) => $f($t, 2))->implode('; ') ?: '–' }}</td>
                             <td class="num text-right text-muted">{{ $f($a['in_sample']['f1']) }}</td>
                             <td class="num whitespace-nowrap text-[13px] text-muted">{{ $weightsLabel($a['best_weights']) }} · {{ $f($a['best_threshold'], 2) }}</td>
                         </tr>
