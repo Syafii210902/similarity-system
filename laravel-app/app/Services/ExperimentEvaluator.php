@@ -385,6 +385,109 @@ class ExperimentEvaluator
         ];
     }
 
+    /**
+     * Evaluasi gabungan beberapa run, satu run per tugas (perbandingan tetap hanya di dalam tugas).
+     * Keputusan run memakai ambang masing-masing run; hasil digabung dengan menjumlahkan TP, FP, TN, FN.
+     * Sweep ambang dan cross-validation dihitung pada seluruh pasangan gabungan, sehingga ambang terpilih
+     * berlaku untuk semua tugas. Semua dihitung dari data tersimpan, tanpa memanggil FastAPI/LLM.
+     *
+     * @param  array<ExperimentRun>  $runs
+     */
+    public function combined(array $runs): array
+    {
+        $rows = collect();
+        $tasks = [];
+        foreach ($runs as $run) {
+            $threshold = (float) $run->config['threshold'];
+            $tier2 = (bool) ($run->config['run_tier2'] ?? false);
+            $runRows = $this->rows($run)->map(fn ($r) => $r + ['task' => $run->id, 'run_threshold' => $threshold]);
+            $rows = $rows->concat($runRows);
+
+            $m = $run->metrics ?? [];
+            $above = $runRows->filter(fn ($r) => $r['combined'] >= $threshold - 1e-9)->count();
+            $simCalls = (int) ($m['llm_similarity_calls'] ?? 0);
+            $aiCalls = (int) ($m['llm_ai_detection_calls'] ?? 0);
+            $tasks[] = [
+                'run' => $run,
+                'pairs' => $runRows->count(),
+                'positives' => $runRows->where('actual', true)->count(),
+                'threshold' => $threshold,
+                'tier2' => $tier2,
+                'tiers' => $this->tierComparison($runRows, $threshold, $tier2),
+                'above' => $above,
+                'reduction' => $runRows->count() > 0 ? 1 - $above / $runRows->count() : null,
+                'sim_calls' => $simCalls,
+                'ai_calls' => $aiCalls,
+                'llm_calls' => $simCalls + $aiCalls,
+                'input_tokens' => (int) ($m['llm_usage']['input_tokens'] ?? 0),
+                'output_tokens' => (int) ($m['llm_usage']['output_tokens'] ?? 0),
+                'seconds' => (float) ($m['total_seconds'] ?? 0),
+            ];
+        }
+        $rows = $rows->values();
+        $weights = $runs[0]->config['weights'];
+        $allTier2 = collect($tasks)->every('tier2');
+        $sum = fn (string $key) => array_sum(array_column($tasks, $key));
+
+        $aiRuns = array_values(array_filter($runs, fn ($run) => $run->config['run_ai_detection'] ?? false));
+        $aiScores = collect($aiRuns)->flatMap(fn ($run) => $run->aiScores()->with('document')->get());
+
+        return [
+            'tasks' => $tasks,
+            'rows' => $rows,
+            'weights' => $weights,
+            'warnings' => $this->combinedWarnings($runs),
+            'tiers' => [
+                'tier1' => $this->metrics->confusion($rows, fn ($r) => $r['combined'] >= $r['run_threshold'] - 1e-9),
+                'tier12' => $allTier2
+                    ? $this->metrics->confusion($rows, fn ($r) => $r['combined'] >= $r['run_threshold'] - 1e-9 && $r['llm_positive'])
+                    : null,
+            ],
+            'efficiency' => [
+                'pairs' => $rows->count(),
+                'above' => $sum('above'),
+                'reduction' => $rows->count() > 0 ? 1 - $sum('above') / $rows->count() : null,
+                'sim_calls' => $sum('sim_calls'),
+                'ai_calls' => $sum('ai_calls'),
+                'llm_calls' => $sum('llm_calls'),
+                'input_tokens' => $sum('input_tokens'),
+                'output_tokens' => $sum('output_tokens'),
+                'seconds' => $sum('seconds'),
+            ],
+            'sweep' => $this->sweep($rows, $weights),
+            'ablation' => $this->ablation($rows, $weights),
+            'ai' => $aiRuns ? $this->aiEvaluationFor($aiScores) : null,
+            'consistency' => $aiRuns ? $this->aiConsistencyFor($aiRuns) : null,
+        ];
+    }
+
+    /** Peringatan bila run yang digabung tidak sebanding (dataset sama, atau parameter/model berbeda). */
+    private function combinedWarnings(array $runs): array
+    {
+        $warnings = [];
+        $datasets = array_map(fn ($run) => $run->dataset_id, $runs);
+        if (count($datasets) !== count(array_unique($datasets))) {
+            $warnings[] = 'Ada lebih dari satu run dari dataset (tugas) yang sama; pasangannya terhitung ganda.';
+        }
+        $checks = [
+            'ambang' => fn ($run) => (string) $run->config['threshold'],
+            'bobot lapis' => fn ($run) => json_encode($run->config['weights']),
+            'panjang passage' => fn ($run) => (string) $run->config['passage_max_words'],
+            'ambang kalimat' => fn ($run) => (string) $run->config['sentence_match_threshold'],
+            'rumus skor passage' => fn ($run) => (string) ($run->metrics['multilayer']['passage_formula'] ?? ''),
+            'Tahap 2 (LLM)' => fn ($run) => json_encode((bool) ($run->config['run_tier2'] ?? false)),
+            'deteksi AI' => fn ($run) => json_encode((bool) ($run->config['run_ai_detection'] ?? false)),
+            'model LLM' => fn ($run) => (string) ($run->metrics['llm']['model'] ?? ''),
+        ];
+        foreach ($checks as $label => $value) {
+            if (count(array_unique(array_map($value, $runs))) > 1) {
+                $warnings[] = "Nilai {$label} berbeda antar-run, sehingga hasil gabungan tidak sebanding.";
+            }
+        }
+
+        return $warnings;
+    }
+
     /** @param  array<float>  $values */
     private function sampleSd(array $values): float
     {
@@ -473,19 +576,25 @@ class ExperimentEvaluator
         return $best;
     }
 
-    /** Fold stratified dengan pengacakan ber-seed (dapat direproduksi). */
+    /**
+     * Fold stratified dengan pengacakan ber-seed (dapat direproduksi).
+     * Pada evaluasi gabungan, stratifikasi per tugas × label agar tiap fold memuat pasangan dari semua tugas.
+     */
     private function folds(Collection $rows): array
     {
         mt_srand(self::SEED);
         $folds = array_fill(0, self::FOLDS, []);
+        $tasks = $rows->pluck('task')->unique()->values()->all();
         foreach ([true, false] as $label) {
-            $indices = $rows->keys()->filter(fn ($i) => $rows[$i]['actual'] === $label)->values()->all();
-            for ($i = count($indices) - 1; $i > 0; $i--) {
-                $j = mt_rand(0, $i);
-                [$indices[$i], $indices[$j]] = [$indices[$j], $indices[$i]];
-            }
-            foreach ($indices as $k => $index) {
-                $folds[$k % self::FOLDS][] = $index;
+            foreach ($tasks as $task) {
+                $indices = $rows->keys()->filter(fn ($i) => $rows[$i]['actual'] === $label && ($rows[$i]['task'] ?? null) === $task)->values()->all();
+                for ($i = count($indices) - 1; $i > 0; $i--) {
+                    $j = mt_rand(0, $i);
+                    [$indices[$i], $indices[$j]] = [$indices[$j], $indices[$i]];
+                }
+                foreach ($indices as $k => $index) {
+                    $folds[$k % self::FOLDS][] = $index;
+                }
             }
         }
         mt_srand();

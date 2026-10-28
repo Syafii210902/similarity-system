@@ -376,6 +376,46 @@ class ExperimentLabTest extends TestCase
             ->assertSee('berubah');
     }
 
+    public function test_combined_evaluation_sums_tasks_and_pools_cross_validation(): void
+    {
+        $runA = $this->completedRun($this->sampleDataset());
+        $runB = $this->completedRun($this->sampleDataset());
+        $evaluator = app(ExperimentEvaluator::class);
+
+        $c = $evaluator->combined([$runA, $runB]);
+        $single = $evaluator->tierComparison($evaluator->rows($runA), 0.7, true);
+
+        // Dua tugas identik: gabungan = jumlah TP/FP/TN/FN tiap tugas, metrik rasio sama.
+        $this->assertSame(91 * 2, $c['rows']->count());
+        foreach (['tp', 'fp', 'fn', 'tn'] as $k) {
+            $this->assertSame($single['tier1'][$k] * 2, $c['tiers']['tier1'][$k]);
+            $this->assertSame($single['tier12'][$k] * 2, $c['tiers']['tier12'][$k]);
+        }
+        $this->assertSame([], $c['warnings']);
+        $this->assertSame(20, $c['efficiency']['sim_calls']);
+        $this->assertSame(28, $c['ai']['validCount']);
+        $this->assertCount(6, $c['ablation']);
+        $this->assertCount(5, $c['ablation'][0]['cv']['thresholds']);
+
+        // Fold gabungan stratified per tugas: tiap fold memuat pasangan dari kedua tugas.
+        $folds = (fn ($rows) => $this->folds($rows))->call($evaluator, $c['rows']);
+        foreach ($folds as $fold) {
+            $this->assertCount(2, collect($fold)->map(fn ($i) => $c['rows'][$i]['task'])->unique());
+        }
+
+        // Run dari dataset yang sama → peringatan.
+        $this->assertNotEmpty($evaluator->combined([$runA, $runA->replicate()->fill(['id' => null])])['warnings'] ?? []);
+
+        $this->actingAs($this->peneliti)
+            ->get(route('peneliti.combined', ['runs' => [$runA->id, $runB->id]]))
+            ->assertOk()
+            ->assertSee('Hasil per tugas dan gabungan')
+            ->assertSee('5-fold CV gabungan')
+            ->assertSee('Total panggilan LLM');
+
+        $this->get(route('peneliti.combined', ['runs' => [$runA->id]]))->assertOk()->assertSee('Pilih minimal 2 run');
+    }
+
     public function test_quick_compare_renders_engine_result(): void
     {
         Http::fake(['*/api/v1/compare-texts' => Http::response([

@@ -10,6 +10,7 @@ use App\Http\Controllers\Dosen\CourseStudentController as DosenCourseStudentCont
 use App\Http\Controllers\Dosen\EvaluationController as DosenEvaluationController;
 use App\Http\Controllers\Dosen\GroundTruthController as DosenGroundTruthController;
 use App\Http\Controllers\Mahasiswa\CourseController as MahasiswaCourseController;
+use App\Http\Controllers\Peneliti\CombinedController as PenelitiCombinedController;
 use App\Http\Controllers\Peneliti\CompareController as PenelitiCompareController;
 use App\Http\Controllers\Peneliti\DatasetController as PenelitiDatasetController;
 use App\Http\Controllers\Peneliti\DocumentController as PenelitiDocumentController;
@@ -95,6 +96,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/runs/{run}/export', [PenelitiRunController::class, 'export'])->name('runs.export');
         Route::delete('/runs/{run}', [PenelitiRunController::class, 'destroy'])->name('runs.destroy');
 
+        Route::get('/gabungan', [PenelitiCombinedController::class, 'show'])->name('combined');
         Route::get('/compare', [PenelitiCompareController::class, 'show'])->name('compare');
         Route::post('/compare', [PenelitiCompareController::class, 'run'])->name('compare.run');
     });

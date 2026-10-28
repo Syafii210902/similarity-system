@@ -16,6 +16,7 @@
         ],
         'peneliti' => [
             ['label' => 'Lab Pengujian', 'icon' => 'flask', 'url' => route('peneliti.dashboard'), 'active' => request()->routeIs('peneliti.dashboard')],
+            ['label' => 'Evaluasi gabungan', 'icon' => 'chart', 'url' => route('peneliti.combined'), 'active' => request()->routeIs('peneliti.combined')],
             ['label' => 'Uji cepat dua teks', 'icon' => 'compare', 'url' => route('peneliti.compare'), 'active' => request()->routeIs('peneliti.compare*')],
         ],
         'mahasiswa' => [

@@ -5,6 +5,7 @@
 @section('content')
 <x-page-header title="Lab Pengujian" meta="Uji efektivitas metode dengan korpus berlabel, terpisah dari data perkuliahan.">
     <x-slot:actions>
+        <a href="{{ route('peneliti.combined') }}" class="btn btn-secondary">Evaluasi gabungan</a>
         <a href="{{ route('peneliti.compare') }}" class="btn btn-secondary">Uji cepat dua teks</a>
     </x-slot:actions>
 </x-page-header>
