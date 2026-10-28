@@ -32,7 +32,7 @@ class ExperimentImportService
         'parafrase manual' => 'PARAPHRASE_MANUAL', 'parafrase' => 'PARAPHRASE_MANUAL', 'paraphrase_manual' => 'PARAPHRASE_MANUAL',
         'parafrase ai' => 'PARAPHRASE_AI', 'parafrase oleh ai' => 'PARAPHRASE_AI', 'paraphrase_ai' => 'PARAPHRASE_AI',
         'independen' => 'INDEPENDENT', 'independen (topik sama)' => 'INDEPENDENT', 'independent' => 'INDEPENDENT',
-        'ditulis ai' => 'AI_GENERATED', 'ai' => 'AI_GENERATED', 'ai_generated' => 'AI_GENERATED',
+        'ditulis ai' => 'AI_GENERATED', 'full ai' => 'AI_GENERATED', 'ai' => 'AI_GENERATED', 'ai_generated' => 'AI_GENERATED',
     ];
 
     public function __construct(
