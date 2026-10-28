@@ -36,6 +36,10 @@ services:
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-opus-5-5}
       - LLM_EFFORT=${LLM_EFFORT:-low}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # Jeda antar-panggilan Gemini (detik). Akun gratis ±5 RPM -> 12.
+      - GEMINI_DELAY_SECONDS=${GEMINI_DELAY_SECONDS:-1.0}
+      - GEMINI_RATE_LIMIT_RETRIES=${GEMINI_RATE_LIMIT_RETRIES:-3}
+      - GEMINI_RATE_LIMIT_WAIT=${GEMINI_RATE_LIMIT_WAIT:-30}
       - EMBEDDING_MODEL_NAME=paraphrase-multilingual-MiniLM-L12-v2
       - TZ=Asia/Jakarta
       - ENGINE_API_KEY=${ANALYSIS_ENGINE_KEY}

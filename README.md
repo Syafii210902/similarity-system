@@ -190,6 +190,8 @@ Dibuat oleh `php artisan migrate --seed`. **Ganti password sebelum dipakai di lu
 | `GEMINI_API_KEY` | salah satu | Dipakai bila `ANTHROPIC_API_KEY` kosong. |
 | `LLM_PROVIDER` | tidak | Paksa provider: `anthropic` atau `gemini`. |
 | `CLAUDE_MODEL`, `LLM_EFFORT` | tidak | Bawaan `claude-opus-5-5` dan `low`. |
+| `GEMINI_DELAY_SECONDS` | tidak | Jeda antar-panggilan Gemini (bawaan `1.0`). Akun gratis ±5 RPM: isi `12`. |
+| `GEMINI_RATE_LIMIT_RETRIES`, `GEMINI_RATE_LIMIT_WAIT` | tidak | Saat kena 429: berapa kali menunggu (bawaan `3`) dan lama tunggu awal dalam detik (bawaan `30`). |
 
 Setelah mengubah `.env` root, jalankan `docker compose up -d` agar container membaca nilai baru.
 

@@ -364,8 +364,7 @@ def run_analysis(payload: AnalysisRequest, metrics: dict) -> dict:
             llm_calls += 1
             print("Score >= Threshold! Triggering Gemini LLM...", flush=True)
             llm_res = analyze_similarity_with_llm(doc_a['name'], doc_b['name'], evidence, metrics["llm_usage"])
-            if llm.LLM_PROVIDER == "gemini":
-                time.sleep(1.0)  # Jeda manual untuk Gemini; SDK Anthropic menangani rate limit sendiri
+            llm.pause_between_calls()
 
         results.append({
             "doc_a": {"submission_id": doc_a["submission_id"], "student_name": doc_a["name"]},
@@ -392,8 +391,7 @@ def run_analysis(payload: AnalysisRequest, metrics: dict) -> dict:
             break
         ai_res = detect_ai_generated_text(doc['name'], multilayer.sample_excerpt(doc_layers), metrics["llm_usage"])
         ai_detection_list.append({"submission_id": doc["submission_id"], **ai_res})
-        if llm.LLM_PROVIDER == "gemini":
-            time.sleep(1.0)
+        llm.pause_between_calls()
     metrics["ai_detection_seconds"] = round(time.perf_counter() - t3, 3)
     metrics["llm_ai_detection_calls"] = len(ai_detection_list)
     metrics["ai_detection_errors"] = sum(1 for d in ai_detection_list if d["verdict"] == "ERROR")

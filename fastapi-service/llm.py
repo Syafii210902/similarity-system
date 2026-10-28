@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Optional
 
@@ -39,11 +40,23 @@ FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
 
 GEMINI_MODELS = [m.strip() for m in os.getenv("GEMINI_MODELS", "gemini-3.6-flash,gemini-3.5-flash").split(",") if m.strip()]
 
+# Kuota Gemini gratis dibatasi per menit (RPM). Jeda antar-panggilan diatur dari .env;
+# mis. batas 5 RPM -> GEMINI_DELAY_SECONDS=12. Saat terkena 429, tunggu lalu coba lagi.
+GEMINI_DELAY_SECONDS = float(os.getenv("GEMINI_DELAY_SECONDS", "1.0"))
+GEMINI_RATE_LIMIT_RETRIES = int(os.getenv("GEMINI_RATE_LIMIT_RETRIES", "3"))
+GEMINI_RATE_LIMIT_WAIT = float(os.getenv("GEMINI_RATE_LIMIT_WAIT", "30"))
+
 _anthropic_client: Optional[anthropic.Anthropic] = None
 
 
 def active_model() -> str:
     return CLAUDE_MODEL if LLM_PROVIDER == "anthropic" else ",".join(GEMINI_MODELS)
+
+
+def pause_between_calls() -> None:
+    """Jeda antar-panggilan Gemini (SDK Anthropic sudah menangani rate limit sendiri)."""
+    if LLM_PROVIDER == "gemini":
+        time.sleep(GEMINI_DELAY_SECONDS)
 
 
 def _claude() -> anthropic.Anthropic:
@@ -137,11 +150,25 @@ def _clean_json_response(raw_text: str) -> str:
     return text
 
 
+def _rate_limit_wait(error: Exception, attempt: int) -> Optional[float]:
+    """Lama tunggu bila error berupa 429/RESOURCE_EXHAUSTED, selain itu None.
+
+    Pakai retryDelay dari respons Google bila ada; jika tidak, backoff linear dari GEMINI_RATE_LIMIT_WAIT.
+    """
+    message = str(error)
+    if getattr(error, "code", None) != 429 and "429" not in message and "RESOURCE_EXHAUSTED" not in message:
+        return None
+    match = re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+(?:\.\d+)?)s", message)
+    wait = float(match.group(1)) if match else GEMINI_RATE_LIMIT_WAIT * attempt
+    return min(max(wait, GEMINI_DELAY_SECONDS), 120.0)
+
+
 def _call_gemini(prompt: str, label: str) -> Optional[dict]:
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     for model_name in GEMINI_MODELS:
-        for attempt in range(2):
+        attempt, rate_limited = 0, 0
+        while attempt < 2:
             try:
                 print(f"[Gemini] {label} ({model_name}) - attempt {attempt + 1}", flush=True)
                 response = client.models.generate_content(
@@ -153,8 +180,18 @@ def _call_gemini(prompt: str, label: str) -> Optional[dict]:
                     data = json.loads(_clean_json_response(response.text))
                     if isinstance(data, dict):
                         return data
+                attempt += 1
             except Exception as e:
+                wait = _rate_limit_wait(e, rate_limited + 1)
+                if wait is not None and rate_limited < GEMINI_RATE_LIMIT_RETRIES:
+                    # Kena batas kuota per menit: tunggu tanpa menghabiskan jatah percobaan biasa.
+                    rate_limited += 1
+                    print(f"[Gemini] {label} ({model_name}) rate limit, tunggu {wait:.0f} detik "
+                          f"({rate_limited}/{GEMINI_RATE_LIMIT_RETRIES})", flush=True)
+                    time.sleep(wait)
+                    continue
                 print(f"[Gemini] {label} ({model_name}) error: {e}", flush=True)
+                attempt += 1
                 time.sleep(2)
 
     return None
