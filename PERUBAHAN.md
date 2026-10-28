@@ -23,7 +23,7 @@ yang berkomunikasi secara asinkron. Seluruh pemrosesan NLP tetap berada di FastA
 | Hasil analisis | Hanya JSON via API | Halaman hasil: daftar pasangan, matriks heatmap, detail segmen |
 | Evaluasi metode | Tidak ada | Validasi dosen (ground truth) + precision/recall/F1 + ekspor CSV |
 | Keamanan antar-service | Token ditulis langsung di kode; webhook tanpa verifikasi | Kunci acak dari `.env`, diverifikasi di kedua arah |
-| Provider LLM | Gemini saja | Claude atau Gemini (dipilih otomatis lewat `.env`) |
+| Provider LLM | Gemini, jeda tetap 1 detik | Gemini dengan model cadangan, jeda dan penanganan rate limit dari `.env` |
 | Pengujian otomatis | 2 test bawaan | 63 test fitur (273 assertion) |
 
 ---
@@ -207,24 +207,20 @@ jumlah error, dan pemakaian token. Data ini langsung dapat dipakai di bab hasil 
 
 ---
 
-## 8. Integrasi LLM: Claude & Gemini
+## 8. Integrasi LLM: Gemini
 
-Modul `fastapi-service/llm.py` mendukung dua provider:
+Modul `fastapi-service/llm.py` memanggil **Google Gemini** untuk Tahap 2 dan deteksi AI:
 
-- **Claude** (Anthropic API) dipakai otomatis bila `ANTHROPIC_API_KEY` terisi di `.env` root;
-  selain itu **Gemini**. Bisa dipaksa dengan `LLM_PROVIDER=anthropic|gemini`.
-- Model bawaan Claude: **`claude-opus-5-5` dengan `effort: low`** (model terkuat dengan penalaran secukupnya agar
-  hemat token). Dapat diganti lewat `CLAUDE_MODEL` dan `LLM_EFFORT`.
-- Claude memakai **structured outputs** (JSON Schema), sehingga jawaban selalu JSON valid sesuai skema.
-- Fallback otomatis bila model menolak permintaan, retry untuk rate limit/error server, dan penanganan
-  API key salah, kuota habis, serta output terpotong tanpa menghentikan proses.
-
-> **Penting:** langganan Claude Pro (claude.ai) **tidak** mencakup akses API. API key dibuat terpisah di
-> console.anthropic.com dengan saldo prabayar.
-> Untuk penelitian, **jangan mencampur hasil dari dua provider** dalam satu evaluasi; provider dan model
-> setiap run sudah tercatat di metrik.
-
----
+- Model dicoba berurutan sesuai `GEMINI_MODELS` (bawaan `gemini-3.6-flash`, cadangan `gemini-3.5-flash`).
+  Untuk pengujian penelitian dipakai **satu model saja**, `gemini-3.5-flash-lite` (akun gratis: 15 RPM, 500 RPD),
+  agar hasil tidak tercampur dari dua model dan seluruh pengujian selesai dalam satu hari. Model kini benar-benar
+  diteruskan dari `.env` lewat `docker-compose.yml` (sebelumnya `GEMINI_MODELS` tidak sampai ke container).
+- Jeda antar-panggilan diatur lewat `GEMINI_DELAY_SECONDS` agar tidak melampaui batas RPM akun gratis.
+- Saat terkena rate limit (429), sistem menunggu sesuai `retryDelay` dari Google atau backoff
+  (`GEMINI_RATE_LIMIT_WAIT`, maksimal `GEMINI_RATE_LIMIT_RETRIES` kali) sebelum pindah ke model cadangan.
+- Kegagalan tidak menghentikan proses; hasilnya dicatat sebagai `ERROR`. Model dan jumlah token setiap run
+  tercatat di metrik.
+- Dukungan Claude (Anthropic API) yang sempat ditambahkan sudah **dihapus** karena tidak dipakai dalam penelitian.
 
 ## 9. Keamanan
 
@@ -274,7 +270,22 @@ Akun: `peneliti@kampus.ac.id` / `password`. Hanya role **peneliti** yang dapat m
   - **Pengaruh ambang deteksi AI**: precision, recall, dan F1 deteksi AI untuk ambang 0,10–0,90 (grafik + tabel)
     dan form mencoba ambang lain, dihitung dari probabilitas tersimpan. Ambang bawaan 0,70/0,35 adalah nilai awal
     peneliti (bukan dari literatur), sehingga ambang akhir dipilih dari data dengan mengutamakan precision.
+  - **Uji konsistensi deteksi AI**: dokumen run dinilai ulang 2–5 kali dengan prompt dan cuplikan yang sama
+    (ulangan ke-1 = hasil run). Ditampilkan simpangan baku dan rentang skor per dokumen, persentase dokumen yang
+    verdict dan keputusan AI-nya (ambang 0,5) tidak berubah, ringkasan per kategori, serta precision/recall/F1 tiap
+    ulangan (F1 rata-rata ± sd). FastAPI mengirim hasil **per dokumen** dan berhenti otomatis setelah 2 kegagalan
+    berturut-turut (kuota habis), sehingga proses dapat **dilanjutkan** tanpa mengulang yang sudah berhasil.
+    Dokumen dapat dipilih untuk uji kecil (demo sidang). Peringatan muncul bila model LLM ulangan berbeda dengan run.
+  - **Total panggilan LLM** di ringkasan run = verifikasi pasangan (Tahap 2) + deteksi AI (satu per dokumen).
   - Peringatan otomatis bila ada panggilan LLM yang gagal (hasil Tahap 2/deteksi AI tidak valid).
+- **Evaluasi gabungan** (menu "Evaluasi gabungan"): pilih satu run per tugas, lalu hasil akhir penelitian dihitung
+  dari data tersimpan (tanpa memanggil LLM):
+  - tabel per tugas + baris gabungan (TP, FP, TN, FN dijumlahkan sebelum metrik dihitung), Tahap 1 vs Tahap 1+2;
+  - efisiensi per tugas dan total: pasangan diteruskan, reduction rate, panggilan verifikasi + deteksi AI, token, waktu;
+  - ablation dan **5-fold CV pada seluruh pasangan gabungan**, fold stratified per tugas × label, sehingga satu
+    ambang terpilih berlaku untuk semua tugas; grafik dan tabel F1/reduction rate terhadap ambang;
+  - deteksi AI gabungan (ambang 0,50 + sweep ambang) dan uji konsistensi gabungan;
+  - peringatan bila run berasal dari dataset yang sama atau parameter/model-nya berbeda.
   - Ekspor CSV berisi metadata konfigurasi.
 - **Impor massal dokumen.** Pilih banyak berkas sekaligus (maks. 200, masing-masing ≤ 10 MB) ditambah satu
   **CSV manifest** berkolom `berkas`, `judul`, `kategori`, `sumber` (opsional `teks` sebagai ganti berkas).
@@ -285,6 +296,13 @@ Akun: `peneliti@kampus.ac.id` / `password`. Hanya role **peneliti** yang dapat m
   kosong/tidak ditemukan/melingkar, berkas tidak tercantum di manifest), **tidak ada yang disimpan** dan setiap
   kesalahan ditampilkan per nomor baris. Batas unggah PHP dinaikkan (`docker/php/uploads.ini`: `post_max_size` 210M,
   `max_file_uploads` 200). ZIP tidak dipakai karena ekstensi `zip` PHP tidak tersedia di container.
+- **Penjelasan di setiap bagian hasil** (halaman run dan evaluasi gabungan): blok lipat "Penjelasan" berisi apa ini,
+  menguji apa (RM berapa), cara membaca (besar/kecil yang baik), rentang nilai, dan sumber datanya, ditambah panel
+  "Istilah dan cara membaca nilai". Isi ditulis terpusat di `app/Support/MetricGuide.php`.
+- Impor CSV mengenali kategori `full ai` (istilah proposal) sebagai "Ditulis AI".
+- Panduan langkah pengujian sesuai proposal revisi dosbim 2: `docs/Panduan-Pengujian.md`
+  beserta versi PDF-nya. Panduan lama (`Panduan-Uji-Coba-Metode.pdf`, `Alur-Aplikasi.pdf`) dihapus karena masih
+  memuat Claude dan rumusan masalah lama.
 - **Uji cepat dua teks**: tempel dua teks, langsung terlihat skor per lapis, passage bukti, dan (opsional) hasil LLM.
   Cocok untuk demonstrasi saat sidang.
 
@@ -321,8 +339,8 @@ Selama pengembangan, beberapa data di database lokal ikut diubah:
 |---|---|
 | `ANALYSIS_ENGINE_KEY` | Kunci Laravel → FastAPI (sudah diisi acak) |
 | `ANALYSIS_WEBHOOK_KEY` | Kunci FastAPI → webhook Laravel (sudah diisi acak) |
-| `ANTHROPIC_API_KEY` | Isi untuk memakai Claude; kosongkan untuk Gemini |
-| `CLAUDE_MODEL`, `LLM_EFFORT` | Opsional: model dan tingkat penalaran Claude |
+| `GEMINI_MODELS` | Opsional: model Gemini yang dicoba berurutan (penelitian: `gemini-3.5-flash-lite` saja) |
+| `GEMINI_DELAY_SECONDS`, `GEMINI_RATE_LIMIT_RETRIES`, `GEMINI_RATE_LIMIT_WAIT` | Opsional: jeda antar-panggilan Gemini dan penanganan rate limit |
 | `LAYER_WEIGHTS`, `PASSAGE_MAX_WORDS`, `SENTENCE_MATCH_THRESHOLD`, `EVIDENCE_PASSAGES` | Opsional: parameter metode multi-lapis (diatur lewat `docker-compose.yml`) |
 
 Setelah mengubah `.env` root, jalankan `docker compose up -d` agar container membaca nilai baru.
@@ -331,7 +349,7 @@ Setelah mengubah `.env` root, jalankan `docker compose up -d` agar container mem
 
 ## 14. Pengujian
 
-- **84 test fitur otomatis** (388 assertion) mencakup login dan hak akses, pengumpulan mahasiswa,
+- **87 test fitur otomatis** (480 assertion) mencakup login dan hak akses, pengumpulan mahasiswa,
   pengelolaan dosen, alur analisis, kontrak webhook, halaman hasil, validasi, perhitungan metrik evaluasi, Lab Pengujian, dan impor massal.
 - Jalankan dengan: `docker exec campus_laravel php artisan test`
 - Selain test otomatis, setiap fitur utama juga diuji langsung di aplikasi yang berjalan
