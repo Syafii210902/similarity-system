@@ -65,10 +65,13 @@
         <p class="alert alert-warn mb-3">Gabungan memuat korpus contoh (teks buatan AI). Gunakan hanya untuk memahami tampilan, bukan sebagai temuan penelitian.</p>
     @endif
 
+    <x-metric-glossary class="mt-6" />
+
     {{-- ============ PER TUGAS ============ --}}
     <section class="mb-10 mt-6">
         <h2 class="text-base font-semibold">Hasil per tugas dan gabungan</h2>
         <p class="mb-3 text-muted">Keputusan run: Tahap 1 = skor gabungan ≥ ambang run; Tahap 1+2 = juga dikonfirmasi LLM. Baris gabungan menjumlahkan TP, FP, TN, dan FN semua tugas sebelum metrik dihitung.</p>
+        <x-explain key="combined_tasks" />
         <div class="panel overflow-x-auto">
             <table class="data-table">
                 <thead>
@@ -124,6 +127,7 @@
     <section class="mb-10">
         <h2 class="text-base font-semibold">Efisiensi pemanggilan LLM</h2>
         <p class="mb-3 text-muted">Tanpa Layer 1, LLM harus memeriksa semua pasangan. Total panggilan LLM = verifikasi pasangan + deteksi AI (satu per dokumen, tidak dipengaruhi ambang).</p>
+        <x-explain key="combined_efficiency" />
         <x-figures class="mb-4" :items="[
             'Pasangan' => $int($e['pairs']),
             'Diteruskan ke LLM' => $int($e['above']),
@@ -172,6 +176,7 @@
     <section class="mb-10">
         <h2 class="text-base font-semibold">Pemilihan ambang dan bobot lapis (5-fold CV gabungan)</h2>
         <p class="mb-3 text-muted">Layer 1 saja, pada seluruh {{ $r['rows']->count() }} pasangan gabungan ({{ $r['rows']->where('actual', true)->count() }} plagiat). Fold dibagi stratified per tugas dan label (seed {{ \App\Services\ExperimentEvaluator::SEED }}), sehingga ambang terpilih berlaku untuk semua tugas. Ambang diuji {{ $f(\App\Services\ExperimentEvaluator::THRESHOLDS[0], 2) }}–{{ $f(last(\App\Services\ExperimentEvaluator::THRESHOLDS), 2) }} dengan interval 0,05.</p>
+        <x-explain key="combined_cv" />
         <div class="panel overflow-x-auto">
             <table class="data-table">
                 <thead>
@@ -207,6 +212,7 @@
     <section class="mb-10">
         <h2 class="text-base font-semibold">F1 terhadap ambang (gabungan)</h2>
         <p class="mb-3 text-muted">Layer 1 saja, data penuh. “Gabungan” memakai bobot {{ $weightsLabel($r['weights']) }}. Garis putus-putus = ambang awal 0,70.</p>
+        <x-explain key="combined_sweep" />
         <div class="panel p-5">
             <x-f1-chart :sweep="$r['sweep']" :mark-threshold="0.70" :series="['combined' => 'Gabungan', 'document' => 'Dokumen', 'passage' => 'Passage', 'sentence' => 'Kalimat']" />
             <details class="mt-4 border-t border-line-soft pt-3">
@@ -238,6 +244,7 @@
         <section class="mb-10">
             <h2 class="text-base font-semibold">Deteksi konten AI (gabungan)</h2>
             <p class="mb-3 text-muted">{{ $ai['validCount'] }} dokumen ({{ $ai['positives'] }} berlabel AI){{ $ai['errors'] > 0 ? '; ' . $ai['errors'] . ' dokumen gagal dianalisis dan tidak dihitung' : '' }}.</p>
+            <x-explain key="ai" />
             <div class="mb-4 grid gap-4 lg:grid-cols-2">
                 @include('dosen.evaluation._confusion', ['title' => 'Ambang 0,50 (keputusan penelitian)', 'm' => $ai['sweep']['0.5'], 'positive' => 'AI', 'negative' => 'Manusia'])
                 <div class="panel overflow-x-auto">
@@ -284,6 +291,7 @@
         <section class="mb-10">
             <h2 class="text-base font-semibold">Uji konsistensi deteksi AI (gabungan)</h2>
             <p class="mb-3 text-muted">Ulangan dijalankan dari halaman tiap run. Keputusan “teks AI” memakai ambang {{ $f($cs['threshold'], 2) }}.</p>
+            <x-explain key="consistency" />
             @if ($cs['modelMismatch'])
                 <p class="alert alert-warn mb-4">Model LLM ulangan ({{ implode(', ', $cs['repeatModels']) }}) berbeda dengan model run ({{ $cs['runModel'] ?? '—' }}), sehingga hasilnya tidak dapat dibandingkan sebagai uji konsistensi.</p>
             @endif

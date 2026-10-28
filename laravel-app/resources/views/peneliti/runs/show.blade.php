@@ -40,6 +40,9 @@
 @elseif ($run->status === 'failed')
     <p class="alert alert-danger">Eksperimen gagal: {{ $run->error_message }}</p>
 @else
+    <x-metric-glossary class="mb-4" />
+    <x-explain key="summary" />
+
     {{-- ============ RINGKASAN ============ --}}
     @php
         // Dihitung dari skor tersimpan: tanpa Tahap 1, LLM harus memeriksa semua pasangan.
@@ -99,6 +102,7 @@
     <section class="mb-10">
         <h2 class="text-base font-semibold">Ablation: kontribusi tiap lapis embedding</h2>
         <p class="mb-3 text-muted">Tahap 1 saja. F1 cross-validation 5-fold (stratified, seed {{ \App\Services\ExperimentEvaluator::SEED }}): ambang, dan untuk baris terakhir juga bobot, dipilih di data latih lalu diuji di data uji. Kolom “terbaik” adalah nilai pada data penuh (optimistis). Kolom “ambang per fold” menunjukkan ambang yang terpilih di data latih tiap fold; nilai yang berdekatan berarti pemilihan ambang stabil.</p>
+        <x-explain key="ablation" />
         <div class="panel overflow-x-auto">
             <table class="data-table">
                 <thead>
@@ -139,6 +143,7 @@
     <section class="mb-10">
         <h2 class="text-base font-semibold">Deteksi per jenis plagiat</h2>
         <p class="mb-3 text-muted">Keputusan run: Tahap 1 = skor gabungan ≥ {{ $f($runThreshold, 2) }}{{ $tier2 ? '; Tahap 1+2 = juga dikonfirmasi LLM' : '' }}. Baris “bukan plagiat” menunjukkan salah tuduh (false positive).</p>
+        <x-explain key="per_category" />
         <div class="panel overflow-x-auto">
             <table class="data-table">
                 <thead>
@@ -175,6 +180,7 @@
     {{-- ============ TAHAP 1 vs 1+2 ============ --}}
     <section class="mb-10">
         <h2 class="mb-3 text-base font-semibold">Keputusan run: Tahap 1 vs Tahap 1 + Tahap 2</h2>
+        <x-explain key="tiers" />
         <div class="grid gap-4 lg:grid-cols-2">
             @include('dosen.evaluation._confusion', ['title' => 'Tahap 1 saja (gabungan ≥ ' . $f($runThreshold, 2) . ')', 'm' => $tiers['tier1'], 'positive' => 'Plagiat', 'negative' => 'Bukan'])
             @if ($tiers['tier12'])
@@ -189,6 +195,7 @@
     <section class="mb-10">
         <h2 class="text-base font-semibold">F1 terhadap ambang</h2>
         <p class="mb-3 text-muted">Tahap 1 saja, pada data penuh. “Gabungan” memakai bobot run. Garis putus-putus = ambang run.</p>
+        <x-explain key="sweep" />
         <div class="panel p-5">
             <x-f1-chart :sweep="$sweep" :mark-threshold="$runThreshold" :series="['combined' => 'Gabungan', 'document' => 'Dokumen', 'passage' => 'Passage', 'sentence' => 'Kalimat']" />
             <details class="mt-4 border-t border-line-soft pt-3">
@@ -221,6 +228,7 @@
     <section id="coba" class="mb-10">
         <h2 class="text-base font-semibold">Coba bobot &amp; ambang lain</h2>
         <p class="mb-3 text-muted">Dihitung ulang dari skor tersimpan, tanpa memanggil FastAPI atau LLM.</p>
+        <x-explain key="try" />
         <div class="grid gap-4 lg:grid-cols-[340px_1fr]">
             <form method="GET" action="{{ route('peneliti.runs.show', $run) }}#coba" class="panel space-y-4 p-5">
                 <fieldset>
@@ -249,6 +257,7 @@
         <section class="mb-10">
             <h2 class="text-base font-semibold">Deteksi konten AI</h2>
             <p class="mb-3 text-muted">Label: “Ditulis AI” dan “Parafrase oleh AI” = teks AI. {{ $ai['errors'] > 0 ? $ai['errors'] . ' dokumen gagal dianalisis dan tidak dihitung.' : '' }}</p>
+            <x-explain key="ai" />
             <div class="mb-4 grid gap-4 lg:grid-cols-2">
                 @include('dosen.evaluation._confusion', ['title' => 'Ketat: hanya “Kemungkinan AI”', 'm' => $ai['strict'], 'positive' => 'AI', 'negative' => 'Manusia'])
                 @include('dosen.evaluation._confusion', ['title' => 'Longgar: “Kemungkinan AI” atau “Campuran”', 'm' => $ai['lenient'], 'positive' => 'AI', 'negative' => 'Manusia'])
@@ -263,6 +272,7 @@
                     sehingga ambang sebaiknya dipilih dari tabel ini. Untuk tugas mahasiswa, utamakan <b>precision</b> (hindari salah menuduh).
                     Dihitung dari {{ $ai['validCount'] }} dokumen ({{ $ai['positives'] }} berlabel AI), tanpa memanggil LLM lagi.
                 </p>
+                <x-explain key="ai_threshold" />
                 @if ($ai['validCount'] === 0)
                     <p class="text-muted">Tidak ada hasil deteksi AI yang valid (semua gagal dianalisis), sehingga ambang tidak dapat dievaluasi.</p>
                 @else
@@ -358,6 +368,7 @@
                 Keputusan “teks AI” memakai ambang {{ $f($cs['threshold'], 2) }}. Simpangan baku kecil dan keputusan yang tidak berubah berarti penilaian LLM konsisten.
                 Ulangan yang sudah berhasil tidak dijalankan lagi, sehingga proses dapat dilanjutkan bila terhenti karena kuota.
             </p>
+            <x-explain key="consistency" />
 
             @if ($running)
                 <div class="panel mb-4 px-5 py-3 text-sm" data-consistency-poll="{{ route('peneliti.runs.status', $run) }}" data-repeats="{{ $run->aiRepeats()->count() }}">
@@ -421,6 +432,7 @@
 
     {{-- ============ SEMUA PASANGAN ============ --}}
     <section>
+        <x-explain key="pairs" />
         <details class="panel">
             <summary class="panel-head cursor-pointer"><span class="panel-title">Semua pasangan ({{ $rows->count() }})</span><span class="text-[13px] text-brand">Tampilkan</span></summary>
             <div class="overflow-x-auto">

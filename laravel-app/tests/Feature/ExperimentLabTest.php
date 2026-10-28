@@ -411,7 +411,15 @@ class ExperimentLabTest extends TestCase
             ->assertOk()
             ->assertSee('Hasil per tugas dan gabungan')
             ->assertSee('5-fold CV gabungan')
-            ->assertSee('Total panggilan LLM');
+            ->assertSee('Total panggilan LLM')
+            ->assertSee('Istilah dan cara membaca nilai')
+            ->assertSee(\App\Support\MetricGuide::SECTIONS['combined_cv']['what']);
+
+        $this->get(route('peneliti.runs.show', $runA))
+            ->assertOk()
+            ->assertSee('Penjelasan: apa ini dan cara membacanya')
+            ->assertSee(\App\Support\MetricGuide::SECTIONS['ablation']['read'])
+            ->assertSee(\App\Support\MetricGuide::TERMS['F1-score']);
 
         $this->get(route('peneliti.combined', ['runs' => [$runA->id]]))->assertOk()->assertSee('Pilih minimal 2 run');
     }
